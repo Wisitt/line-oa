@@ -1,15 +1,22 @@
 # loan-bank-office
 
-To install dependencies:
+Node.js backend for loan backoffice (LINE webhook + simple admin dashboard).
 
+## Setup
 ```bash
-bun install
+npm install
 ```
 
-To run:
-
-```bash
-bun run index.ts
+Create `.env` (LINE keys):
+```
+LINE_CHANNEL_ACCESS_TOKEN=...
+LINE_CHANNEL_SECRET=...
 ```
 
-This project was created using `bun init` in bun v1.3.3. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+## Run
+- Dev: `npm run dev` (tsx runs `api/index.ts`)
+- Prod-like: `npm run start`
+
+## Notes
+- SQLite file: `loan.db` (better-sqlite3)
+- Serverless entry: `api/index.ts` (also used locally)

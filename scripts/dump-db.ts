@@ -1,16 +1,8 @@
-import { Database } from "bun:sqlite";
+import Database from "better-sqlite3";
 
-const dbPath = Bun.argv[2] ?? "loan.db";
+const dbPath = process.argv[2] ?? "loan.db";
 
-let db: Database;
-
-try {
-  db = new Database(dbPath, { readonly: true });
-} catch (error) {
-  console.error(`Failed to open ${dbPath}`);
-  console.error(error);
-  process.exit(1);
-}
+const db = new Database(dbPath, { readonly: true });
 
 const tables = db
   .query(

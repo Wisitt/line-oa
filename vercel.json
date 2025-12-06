@@ -1,14 +1,12 @@
 {
-  "bunVersion": "1.1.20",
   "functions": {
-    "api/**/*": {
-      "runtime": "bun@1.1.20",
+    "api/index.ts": {
+      "runtime": "nodejs18.x",
       "includeFiles": "loan.db"
     }
   },
-  "installCommand": "bun install",
-  "buildCommand": "bun run build || true",
-  "devCommand": "bun run dev",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build --if-present",
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
   ]

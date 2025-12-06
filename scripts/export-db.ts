@@ -1,8 +1,8 @@
-import { Database } from "bun:sqlite";
+import Database from "better-sqlite3";
 import { writeFileSync } from "fs";
 
-const dbPath = Bun.argv[2] ?? "loan.db";
-const outPath = Bun.argv[3] ?? "db-export.txt";
+const dbPath = process.argv[2] ?? "loan.db";
+const outPath = process.argv[3] ?? "db-export.txt";
 
 const db = new Database(dbPath, { readonly: true });
 

@@ -1,49 +1,38 @@
 // src/db.ts
-import { Database } from "bun:sqlite";
+import Database from "better-sqlite3";
 import type { Application, Partner } from "./types";
 
 const db = new Database("loan.db");
 
 // ---------- CREATE TABLES ----------
-db.run(`
+db.exec(`
   CREATE TABLE IF NOT EXISTS partners (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
     line_user_id TEXT UNIQUE
   );
-`);
-db.run(`
+
   CREATE TABLE IF NOT EXISTS applications (
     id TEXT PRIMARY KEY,
     created_at TEXT,
-
     partner_id INTEGER,
     partner_name TEXT,
     bank_name TEXT,
-
     customer_name TEXT,
     monthly_income INTEGER,
-
     property_type TEXT,
     project_name TEXT,
-
     loan_amount INTEGER,
     collateral_value INTEGER,
     ltv TEXT,
-
     credit_score TEXT,
     status TEXT,
     status_group TEXT,
     last_status_updated TEXT,
-
     officer_name TEXT,
     updated_at TEXT
   );
 
-  
-`);
-
-db.run(`
   CREATE TABLE IF NOT EXISTS conversation_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     case_id TEXT,
@@ -68,55 +57,54 @@ export interface ConversationLog {
 
 export function insertConversationLog(log: ConversationLog): void {
   const now = new Date().toISOString();
-  db.run(
+  db.prepare(
     `
-    INSERT INTO conversation_logs (
-      case_id,
-      line_user_id,
-      role,
-      direction,
-      channel,
-      message_text,
-      raw_payload,
-      created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `,
-    [
-      log.case_id,
-      log.line_user_id,
-      log.role,
-      log.direction,
-      log.channel,
-      log.message_text,
-      log.raw_payload ? JSON.stringify(log.raw_payload) : null,
-      now
-    ]
+      INSERT INTO conversation_logs (
+        case_id,
+        line_user_id,
+        role,
+        direction,
+        channel,
+        message_text,
+        raw_payload,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `
+  ).run(
+    log.case_id,
+    log.line_user_id,
+    log.role,
+    log.direction,
+    log.channel,
+    log.message_text,
+    log.raw_payload ? JSON.stringify(log.raw_payload) : null,
+    now
   );
 }
 
 
 // ---------- HELPERS ----------
 export function getPartnerByLine(lineId: string): Partner | undefined {
-  return db
-    .query("SELECT * FROM partners WHERE line_user_id = ?")
-    .get(lineId) as Partner | undefined;
+  return db.prepare("SELECT * FROM partners WHERE line_user_id = ?").get(lineId) as
+    | Partner
+    | undefined;
 }
 
 export function insertPartner(name: string, lineId: string): void {
-  db.run("INSERT INTO partners (name, line_user_id) VALUES (?, ?)", [
+  db.prepare("INSERT INTO partners (name, line_user_id) VALUES (?, ?)").run(
     name,
     lineId
-  ]);
+  );
 }
 
 export function getPartnerById(id: number): Partner | undefined {
-  return db.query("SELECT * FROM partners WHERE id = ?").get(id) as
+  return db.prepare("SELECT * FROM partners WHERE id = ?").get(id) as
     | Partner
     | undefined;
 }
 
 export function insertApplication(app: Application): void {
-  db.run(
+  db.prepare(
     `
     INSERT INTO applications (
       id,
@@ -138,38 +126,37 @@ export function insertApplication(app: Application): void {
       officer_name,
       updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `,
-    [
-      app.id,
-      app.created_at,
-      app.partner_id,
-      app.partner_name,
-      app.bank_name,
-      app.customer_name,
-      app.monthly_income,
-      app.property_type,
-      app.project_name,
-      app.loan_amount,
-      app.collateral_value,
-      app.ltv,
-      app.credit_score,
-      app.status,
-      app.status_group,
-      app.last_status_updated,
-      app.officer_name,
-      app.updated_at
-    ]
+    `
+  ).run(
+    app.id,
+    app.created_at,
+    app.partner_id,
+    app.partner_name,
+    app.bank_name,
+    app.customer_name,
+    app.monthly_income,
+    app.property_type,
+    app.project_name,
+    app.loan_amount,
+    app.collateral_value,
+    app.ltv,
+    app.credit_score,
+    app.status,
+    app.status_group,
+    app.last_status_updated,
+    app.officer_name,
+    app.updated_at
   );
 }
 
 export function findApplication(query: string): Application | undefined {
   return db
-    .query(
+    .prepare(
       `
-      SELECT * FROM applications
-      WHERE id = ? OR customer_name LIKE ?
-      LIMIT 1
-    `
+        SELECT * FROM applications
+        WHERE id = ? OR customer_name LIKE ?
+        LIMIT 1
+      `
     )
     .get(query, `%${query}%`) as Application | undefined;
 }
@@ -195,7 +182,7 @@ export function updateApplicationStatus(
 
   // ดึง loan_amount ปัจจุบันมาใช้คำนวณ LTV
   const row = db
-    .query("SELECT loan_amount FROM applications WHERE id = ?")
+    .prepare("SELECT loan_amount FROM applications WHERE id = ?")
     .get(id) as { loan_amount: number | null } | undefined;
 
   let ltv: string | null = null;
@@ -205,7 +192,7 @@ export function updateApplicationStatus(
     ltv = `${rounded}%`;
   }
 
-  db.run(
+  db.prepare(
     `
     UPDATE applications
     SET status = ?,
@@ -217,31 +204,30 @@ export function updateApplicationStatus(
         last_status_updated = ?,
         updated_at = ?
     WHERE id = ?
-  `,
-    [
-      status,
-      statusGroup,
-      creditScore,
-      officerName,
-      collateralValue,
-      ltv,
-      now,
-      now,
-      id
-    ]
+    `
+  ).run(
+    status,
+    statusGroup,
+    creditScore,
+    officerName,
+    collateralValue,
+    ltv,
+    now,
+    now,
+    id
   );
 }
 
 export function getAllApplications(): Application[] {
   return db
-    .query("SELECT * FROM applications ORDER BY created_at DESC")
+    .prepare("SELECT * FROM applications ORDER BY created_at DESC")
     .all() as Application[];
 }
 
 
 export function getApplicationById(id: string): Application | undefined {
   return db
-    .query("SELECT * FROM applications WHERE id = ? LIMIT 1")
+    .prepare("SELECT * FROM applications WHERE id = ? LIMIT 1")
     .get(id) as Application | undefined;
 }
 
