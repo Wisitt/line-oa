@@ -9,8 +9,7 @@
   "installCommand": "bun install",
   "buildCommand": "bun run build || true",
   "devCommand": "bun run dev",
-  "framework": "other",
-  "routes": [
-    { "src": "/(.*)", "dest": "/api/index" }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
   ]
 }
