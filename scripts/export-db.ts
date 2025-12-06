@@ -7,7 +7,7 @@ const outPath = process.argv[3] ?? "db-export.txt";
 const db = new Database(dbPath, { readonly: true });
 
 const tables = db
-  .query(
+  .prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
   )
   .all()
@@ -15,7 +15,7 @@ const tables = db
 
 function getColumns(table: string): string[] {
   return db
-    .query(`PRAGMA table_info(${table})`)
+    .prepare(`PRAGMA table_info(${table})`)
     .all()
     .map((row: any) => row.name as string);
 }
@@ -37,7 +37,7 @@ if (!tables.length) {
 } else {
   for (const table of tables) {
     const columns = getColumns(table);
-    const rows = db.query(`SELECT * FROM ${table}`).all();
+    const rows = db.prepare(`SELECT * FROM ${table}`).all();
 
     buffer.push(`## ${table} (rows: ${rows.length})`);
     buffer.push(columns.join(" | "));

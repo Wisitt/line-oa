@@ -5,7 +5,7 @@ const dbPath = process.argv[2] ?? "loan.db";
 const db = new Database(dbPath, { readonly: true });
 
 const tables = db
-  .query(
+  .prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
   )
   .all()
@@ -20,8 +20,8 @@ console.log(`Reading ${dbPath}`);
 console.log(`Tables: ${tables.join(", ")}`);
 
 for (const table of tables) {
-  const countRow = db.query(`SELECT COUNT(*) as count FROM ${table}`).get() as { count: number };
-  const rows = db.query(`SELECT * FROM ${table} LIMIT 50`).all();
+  const countRow = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count: number };
+  const rows = db.prepare(`SELECT * FROM ${table} LIMIT 50`).all();
 
   console.log(`\n== ${table} (total: ${countRow.count}, showing up to 50) ==`);
 
