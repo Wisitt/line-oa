@@ -1,8 +1,5 @@
 {
   "bunVersion": "1.1.20",
-  "builds": [
-    { "src": "api/index.ts", "use": "@vercel/bun" }
-  ],
   "functions": {
     "api/**/*": {
       "runtime": "bun@1.1.20",
