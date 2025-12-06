@@ -2,7 +2,11 @@
   "name": "loan-backoffice",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": "24"
+  },
   "scripts": {
+    "build": "tsc --noEmit",
     "dev": "tsx api/index.ts",
     "start": "tsx api/index.ts"
   },
