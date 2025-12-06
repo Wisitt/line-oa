@@ -9,8 +9,8 @@ import {
   updateApplicationStatus,
   getPartnerById,
   insertConversationLog
-} from "./src/db";
-import type { Application, UpdateStatusRequest } from "./src/types";
+} from "../src/db";
+import type { Application, UpdateStatusRequest } from "../src/types";
 
 // LINE Bot client
 const line = new Client({

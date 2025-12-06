@@ -1,4 +1,4 @@
-import { formatBaht, formatThaiDate, statusClass, creditScoreClass, ltvClass } from "../server";
+import { formatBaht, formatThaiDate, statusClass, creditScoreClass, ltvClass } from "../api/server";
 import type { Application } from "./types";
 
 export function renderDashboardHtml(apps: Application[], currentTab: string): string {
