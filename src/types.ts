@@ -3,8 +3,10 @@
 export interface Partner {
   id: number;
   name: string;
-  line_user_id: string;
+  channel_id: string;
+  channel_type: "user" | "group" | "room";
 }
+
 
 // Model เคสกู้บ้านให้ใกล้เคียง loan back office จริง ๆ
 export interface Application {

@@ -28,7 +28,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS partners (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
-    line_user_id TEXT UNIQUE
+    channel_id TEXT UNIQUE,     -- เก็บ userId หรือ groupId
+    channel_type TEXT           -- 'user' | 'group' | 'room'
   );
 
   CREATE TABLE IF NOT EXISTS applications (
@@ -69,7 +70,7 @@ export interface ConversationLog {
   line_user_id: string | null;
   role: "partner" | "bank" | "bot";
   direction: "incoming" | "outgoing";
-  channel: "line" | "backoffice";
+  channel: "line" | "line-group" | "backoffice";
   message_text: string;
   raw_payload?: any;
 }
@@ -103,17 +104,29 @@ export function insertConversationLog(log: ConversationLog): void {
 
 
 // ---------- HELPERS ----------
+
+// src/db.ts
+export function getPartnerByChannelId(channelId: string): Partner | undefined {
+  return db
+    .prepare("SELECT * FROM partners WHERE channel_id = ?")
+    .get(channelId) as Partner | undefined;
+}
+
+export function insertPartner(
+  name: string,
+  channelId: string,
+  channelType: "user" | "group" | "room"
+): void {
+  db.prepare(
+    "INSERT INTO partners (name, channel_id, channel_type) VALUES (?, ?, ?)"
+  ).run(name, channelId, channelType);
+}
+
+
 export function getPartnerByLine(lineId: string): Partner | undefined {
   return db.prepare("SELECT * FROM partners WHERE line_user_id = ?").get(lineId) as
     | Partner
     | undefined;
-}
-
-export function insertPartner(name: string, lineId: string): void {
-  db.prepare("INSERT INTO partners (name, line_user_id) VALUES (?, ?)").run(
-    name,
-    lineId
-  );
 }
 
 export function getPartnerById(id: number): Partner | undefined {

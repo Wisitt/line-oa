@@ -8,7 +8,8 @@ import {
   insertApplication,
   updateApplicationStatus,
   getPartnerById,
-  insertConversationLog
+  insertConversationLog,
+  getPartnerByChannelId
 } from "../src/db.js";
 import type { Application, UpdateStatusRequest } from "../src/types";
 
@@ -96,16 +97,31 @@ export function extractStatus(text: string): string | null {
 export async function handleEvent(event: any) {
   if (event.type !== "message" || event.message.type !== "text") return;
 
-  
   const text: string = event.message.text.trim();
   const lower = text.toLowerCase();
-  const userId: string = event.source.userId;
 
-  // ensure partner record
-  let partner = getPartnerByLine(userId);
+  const sourceType = event.source.type as "user" | "group" | "room";
+  const userId = event.source.userId;
+  const groupId = event.source.groupId;
+  const roomId = event.source.roomId;
+
+  // ถ้าคุยในกลุ่ม → ให้ถือว่าช่องทางหลักคือ group
+  const channelId =
+    sourceType === "group" ? groupId :
+    sourceType === "room"  ? roomId :
+    userId;
+
+  if (!channelId) return; // กัน null safety
+
+  let partner = getPartnerByChannelId(channelId);
   if (!partner) {
-    insertPartner(`partner-${Date.now()}`, userId);
-    partner = getPartnerByLine(userId)!;
+    const name =
+      sourceType === "group"
+        ? `group-${Date.now()}`
+        : `partner-${Date.now()}`;
+
+    insertPartner(name, channelId, sourceType);
+    partner = getPartnerByChannelId(channelId)!;
   }
 
   const role: "partner" | "bank" = "partner";
@@ -268,14 +284,17 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
       `เครดิตสกอร์: ${credit_score ?? "-"}\n` +
       (officer_name ? `โดย: ${officer_name}` : "");
 
-    await line.pushMessage(partner.line_user_id, { type: "text", text: pushText });
+    await line.pushMessage(partner.channel_id, {
+      type: "text",
+      text: pushText
+    });
 
     insertConversationLog({
       case_id: id,
-      line_user_id: partner.line_user_id,
+      line_user_id: partner.channel_id,
       role: "bot",
       direction: "outgoing",
-      channel: "line",
+      channel: partner.channel_type === "group" ? "line-group" : "line",
       message_text: pushText,
       raw_payload: null
     });
