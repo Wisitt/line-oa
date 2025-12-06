@@ -96,6 +96,7 @@ export function extractStatus(text: string): string | null {
 export async function handleEvent(event: any) {
   if (event.type !== "message" || event.message.type !== "text") return;
 
+  
   const text: string = event.message.text.trim();
   const lower = text.toLowerCase();
   const userId: string = event.source.userId;
