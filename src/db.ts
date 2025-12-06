@@ -1,8 +1,27 @@
 // src/db.ts
 import Database from "better-sqlite3";
+import { existsSync, copyFileSync } from "fs";
+import { join } from "path";
 import type { Application, Partner } from "./types";
 
-const db = new Database("loan.db");
+// Use writable location on Vercel (read-only /var/task). Copy bundled DB to /tmp.
+const bundledPath = join(process.cwd(), "loan.db");
+const runtimePath =
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+    ? "/tmp/loan.db"
+    : bundledPath;
+
+if (runtimePath !== bundledPath) {
+  try {
+    if (existsSync(bundledPath)) {
+      copyFileSync(bundledPath, runtimePath);
+    }
+  } catch (err) {
+    console.error("Failed to copy DB to /tmp", err);
+  }
+}
+
+const db = new Database(runtimePath);
 
 // ---------- CREATE TABLES ----------
 db.exec(`
