@@ -367,9 +367,12 @@ if (partner) {
 // ---------- ELYSIA APP ----------
 const port = Number(process.env.PORT) || 3000;
 
-const app = new Elysia()
-  .get("/", () => "Loan Backoffice Elysia Server Running")
-  .get("/admin/dashboard", ({ query }) => {
+export function createApp() {
+  const app = new Elysia();
+
+  app.get("/", () => "Loan Backoffice Elysia Server Running");
+
+  app.get("/admin/dashboard", ({ query }) => {
     const currentTab = (query.tab as string) || "all";
 
     let apps = getAllApplications();
@@ -384,50 +387,96 @@ const app = new Elysia()
       apps = apps.filter((a) => normalizeGroup(a.status_group) === "rejected");
     }
 
-    const rows = apps
-      .map((a) => {
-        const createdAt = formatThaiDate(a.created_at);
-        const monthlyIncome = formatBaht(a.monthly_income ?? null);
-        const loanAmount = formatBaht(a.loan_amount ?? null);
-        const creditScore = a.credit_score ?? "-";
-        const scoreClass = creditScoreClass(a.credit_score);
-        const statusText = a.status ?? "-";
-        const statusCls = statusClass(a.status);
-        const ltvText = a.ltv ? `LTV: ${a.ltv}` : "";
-        const ltvCls = ltvClass(a.ltv);
+    const cardsData = apps.map((a) => {
+      const createdAt = formatThaiDate(a.created_at);
+      const monthlyIncome = formatBaht(a.monthly_income ?? null);
+      const loanAmount = formatBaht(a.loan_amount ?? null);
+      const creditScore = a.credit_score ?? "-";
+      const scoreClass = creditScoreClass(a.credit_score);
+      const statusText = a.status ?? "-";
+      const statusCls = statusClass(a.status);
+      const ltvText = `LTV: ${a.ltv ?? "-"}`;
+      const ltvCls = ltvClass(a.ltv);
+      return { createdAt, monthlyIncome, loanAmount, creditScore, scoreClass, statusText, statusCls, ltvText, ltvCls, app: a };
+    });
 
+    const rows = cardsData
+      .map(({ createdAt, monthlyIncome, loanAmount, creditScore, scoreClass, statusText, statusCls, ltvText, ltvCls, app }) => {
         return `
         <tr class="loan-row">
-          <td class="col-app">
+          <td class="col-app" data-label="เลขที่ใบสมัคร / วันที่">
             <div class="app-id">
-              <a href="/admin/app/${a.id}" class="app-id-link">${a.id}</a>
+              <a href="/admin/app/${app.id}" class="app-id-link">${app.id}</a>
             </div>
             <div class="app-date">${createdAt}</div>
           </td>
-          <td class="col-customer">
-            <div class="customer-name">${a.customer_name || "-"}</div>
+          <td class="col-customer" data-label="ผู้ยื่นกู้ / รายได้">
+            <div class="customer-name">${app.customer_name || "-"}</div>
             <div class="customer-income">เงินเดือน: ${monthlyIncome}</div>
           </td>
-          <td class="col-property">
-            <div class="property-main">${a.property_type || "-"}</div>
-            <div class="property-sub">${a.project_name || ""}</div>
+          <td class="col-property" data-label="หลักทรัพย์ / โครงการ">
+            <div class="property-main">${app.property_type || "-"}</div>
+            <div class="property-sub">${app.project_name || ""}</div>
           </td>
-          <td class="col-loan">
+          <td class="col-loan" data-label="วงเงินขอกู้ (LTV)">
             <div class="loan-amount">${loanAmount}</div>
             <div class="loan-ltv ${ltvCls}">${ltvText}</div>
           </td>
-          <td class="col-score">
+          <td class="col-score" data-label="CREDIT SCORE">
             <span class="credit-score ${scoreClass}">${creditScore}</span>
           </td>
-          <td class="col-status">
+          <td class="col-status" data-label="สถานะ">
             <span class="${statusCls}">${statusText}</span>
-            ${a.officer_name ? `<div class="status-by">โดย: ${a.officer_name}</div>` : ""}
+            ${app.officer_name ? `<div class="status-by">โดย: ${app.officer_name}</div>` : ""}
           </td>
-          <td class="col-actions">
-            <a href="/admin/app/${a.id}" class="btn-sm">อัปเดต</a>
+          <td class="col-actions" data-label="จัดการ">
+            <a href="/admin/app/${app.id}" class="btn-sm">อัปเดต</a>
           </td>
         </tr>
         `;
+      })
+      .join("");
+
+    const cards = cardsData
+      .map(({ createdAt, monthlyIncome, loanAmount, creditScore, scoreClass, statusText, statusCls, ltvText, ltvCls, app }) => {
+        return `
+      <div class="card-mobile">
+        <div class="card-row">
+          <div class="card-id"><a href="/admin/app/${app.id}" class="app-id-link">${app.id}</a></div>
+          <div class="card-date">${createdAt}</div>
+        </div>
+        <div class="card-row">
+          <div>
+            <div class="label-sm">ผู้ยื่นกู้</div>
+            <div class="customer-name">${app.customer_name || "-"}</div>
+            <div class="customer-income">เงินเดือน: ${monthlyIncome}</div>
+          </div>
+          <div class="${statusCls}">${statusText}</div>
+        </div>
+        <div class="card-row">
+          <div>
+            <div class="label-sm">หลักทรัพย์ / โครงการ</div>
+            <div class="property-main">${app.property_type || "-"}</div>
+            <div class="property-sub">${app.project_name || ""}</div>
+          </div>
+        </div>
+        <div class="card-row">
+          <div>
+            <div class="label-sm">วงเงินขอกู้</div>
+            <div class="loan-amount">${loanAmount}</div>
+            <div class="loan-ltv ${ltvCls}">${ltvText}</div>
+          </div>
+          <div>
+            <div class="label-sm">CREDIT SCORE</div>
+            <div class="credit-score ${scoreClass}">${creditScore}</div>
+            ${app.officer_name ? `<div class="status-by">โดย: ${app.officer_name}</div>` : ""}
+          </div>
+        </div>
+        <div class="card-row actions-row">
+          <a href="/admin/app/${app.id}" class="btn-sm btn-block">อัปเดต</a>
+        </div>
+      </div>
+      `;
       })
       .join("");
 
@@ -596,6 +645,50 @@ const app = new Elysia()
       box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
     }
     .btn-sm:hover { background: #1d4ed8; }
+
+    /* Mobile cards */
+    .mobile-cards { display: none; }
+    .card-mobile {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .card-mobile.empty {
+      text-align: center;
+      color: #6b7280;
+      font-size: 14px;
+    }
+    .card-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .card-id { font-weight: 700; color: #2377eb; }
+    .card-date { font-size: 12px; color: #9ca3af; }
+    .label-sm {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #7c8ba1;
+      margin-bottom: 4px;
+    }
+    .actions-row { justify-content: flex-end; }
+    .btn-block { display: inline-block; width: auto; }
+
+    /* Responsive: switch to cards on mobile */
+    .desktop-only { display: block; }
+    @media (max-width: 960px) {
+      body { padding: 16px; }
+      .desktop-only { display: none; }
+      .mobile-cards { display: flex; flex-direction: column; gap: 10px; }
+    }
   </style>
 </head>
 <body>
@@ -618,7 +711,7 @@ const app = new Elysia()
        class="tab ${currentTab === "rejected" ? "tab-active" : ""}">ไม่อนุมัติ</a>
   </div>
 
-  <div class="table-wrapper">
+  <div class="table-wrapper desktop-only">
     <table>
       <thead>
         <tr>
@@ -636,6 +729,10 @@ const app = new Elysia()
       </tbody>
     </table>
   </div>
+
+  <div class="mobile-cards mobile-only">
+    ${cards || '<div class="card-mobile empty">ยังไม่มีข้อมูลเคส</div>'}
+  </div>
 </body>
 </html>`;
 
@@ -643,31 +740,29 @@ const app = new Elysia()
       status: 200,
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
-  })
+  });
 
+  app.get("/admin/app/:id", ({ params }) => {
+    const application = getApplicationById(params.id);
 
-app
-  .get("/admin/app/:id", ({ params }) => {
-    const app = getApplicationById(params.id);
-
-    if (!app) {
+    if (!application) {
       return new Response("ไม่พบเคส", { status: 404 });
     }
 
-    const createdAt = formatThaiDate(app.created_at);
-    const monthlyIncome = formatBaht(app.monthly_income ?? null);
-    const loanAmount = formatBaht(app.loan_amount ?? null);
-    const ltvText = app.ltv || "-";
-    const creditScore = app.credit_score ?? "";
-    const statusText = app.status || "รอพิจารณา";
-    const officerName = app.officer_name ?? "";
-    const collateralValue = app.collateral_value ?? "";
+    const createdAt = formatThaiDate(application.created_at);
+    const monthlyIncome = formatBaht(application.monthly_income ?? null);
+    const loanAmount = formatBaht(application.loan_amount ?? null);
+    const ltvText = application.ltv || "-";
+    const creditScore = application.credit_score ?? "";
+    const statusText = application.status || "รอพิจารณา";
+    const officerName = application.officer_name ?? "";
+    const collateralValue = application.collateral_value ?? "";
 
     const html = `<!DOCTYPE html>
 <html lang="th">
 <head>
   <meta charset="UTF-8" />
-  <title>อัปเดตเคส ${app.id}</title>
+  <title>อัปเดตเคส ${application.id}</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -835,7 +930,7 @@ app
   <div class="card">
     <div class="header-row">
       <h1>อัปเดตสถานะเคสินเชื่อบ้าน</h1>
-      <div class="case-id-chip">เคส: ${app.id}</div>
+      <div class="case-id-chip">เคส: ${application.id}</div>
     </div>
     <div class="meta">สร้างเมื่อ ${createdAt}</div>
 
@@ -848,13 +943,13 @@ app
     <div class="row">
       <div>
         <div class="label">ผู้ยื่นกู้</div>
-        <div class="value">${app.customer_name}</div>
+        <div class="value">${application.customer_name}</div>
         <div class="value-sub">เงินเดือน: ${monthlyIncome}</div>
       </div>
       <div>
         <div class="label">หลักทรัพย์ / โครงการ</div>
-        <div class="value">${app.property_type || "-"}</div>
-        <div class="value-sub">${app.project_name || ""}</div>
+        <div class="value">${application.property_type || "-"}</div>
+        <div class="value-sub">${application.project_name || ""}</div>
       </div>
     </div>
 
@@ -873,7 +968,7 @@ app
       </div>
     </div>
 
-    <form method="post" action="/admin/app/${app.id}">
+    <form method="post" action="/admin/app/${application.id}">
       <div class="field">
         <label for="status">ผลการพิจารณา (สถานะใหม่)</label>
         <select id="status" name="status" required>
@@ -939,10 +1034,9 @@ app
       status: 200,
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
-  })
+  });
 
-
-  .post("/admin/app/:id", async ({ body, params }) => {
+  app.post("/admin/app/:id", async ({ body, params }) => {
     const form = body as any;
 
     const payload: UpdateStatusRequest = {
@@ -957,40 +1051,43 @@ app
 
     await handleAdminUpdate(payload);
 
-    // redirect กลับไปหน้า dashboard
     return new Response(null, {
       status: 302,
       headers: { Location: "/admin/dashboard" }
     });
-  })
+  });
 
-  
-.post("/webhook", async ({ body }) => {
-  try {
-    const anyBody = body as any;
-    console.log("WEBHOOK BODY:", JSON.stringify(anyBody, null, 2));
+  app.post("/webhook", async ({ body }) => {
+    try {
+      const anyBody = body as any;
+      console.log("WEBHOOK BODY:", JSON.stringify(anyBody, null, 2));
 
-    const events = anyBody?.events ?? [];
-    for (const ev of events) {
-      try {
-        await handleEvent(ev);
-      } catch (err) {
-        console.error("Error in single event:", err);
+      const events = anyBody?.events ?? [];
+      for (const ev of events) {
+        try {
+          await handleEvent(ev);
+        } catch (err) {
+          console.error("Error in single event:", err);
+        }
       }
+
+      return "OK";
+    } catch (err) {
+      console.error("Webhook handler error:", err);
+      return "OK";
     }
+  });
 
-    // ไม่ว่าอะไรจะเกิดขึ้น ตอบ OK กลับให้ LINE เสมอ
-    return "OK";
-  } catch (err) {
-    console.error("Webhook handler error:", err);
-    return "OK"; // ยังตอบ 200 ให้ LINE
-  }
-})
-
-  .post("/admin/update", async ({ body }) => {
+  app.post("/admin/update", async ({ body }) => {
     const result = await handleAdminUpdate(body as UpdateStatusRequest);
     return result;
-  })
-  .listen(port);
+  });
 
-console.log(`🚀 Elysia server running on port ${port}`);
+  return app;
+}
+
+if (!process.env.VERCEL) {
+  const app = createApp();
+  app.listen(port);
+  console.log(`🚀 Elysia server running on port ${port}`);
+}
