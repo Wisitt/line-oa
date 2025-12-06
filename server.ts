@@ -370,7 +370,10 @@ const port = Number(process.env.PORT) || 3000;
 export function createApp() {
   const app = new Elysia();
 
-  app.get("/", () => "Loan Backoffice Elysia Server Running");
+  app.get("/", () => new Response(null, {
+    status: 302,
+    headers: { Location: "/admin/dashboard" }
+  }));
 
   app.get("/admin/dashboard", ({ query }) => {
     const currentTab = (query.tab as string) || "all";
