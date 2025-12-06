@@ -192,10 +192,11 @@ async function handleEvent(event: any) {
       };
 
       for (const part of parts) {
-        const [rawKey, rawVal] = part.split("=");
+        const [rawKey = "", rawVal] = part.split("=");
         if (!rawVal) continue;
 
         const key = rawKey.trim();
+        if (!key) continue;
         const val = rawVal.trim();
 
         if (key.includes("ชื่อลูกค้า")) a.customer_name = val;
