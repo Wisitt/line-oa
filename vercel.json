@@ -1,16 +1,12 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "api/index.ts", "use": "@vercel/node@3.1.4" }
-  ],
   "functions": {
     "api/index.ts": {
       "runtime": "nodejs20.x",
       "includeFiles": "loan.db"
     }
   },
-  "routes": [
-    { "src": "/(.*)", "dest": "/api/index.ts" }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
   ],
   "installCommand": "npm install",
   "buildCommand": "npm run build --if-present"
