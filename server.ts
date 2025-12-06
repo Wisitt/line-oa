@@ -60,18 +60,18 @@ export function ltvClass(ltv: string | null | undefined): string {
   return num >= 100 ? "ltv-high" : "ltv-neutral";
 }
 
-function genId(): string {
+export function genId(): string {
   const year = new Date().getFullYear();
   const rnd = ("0000" + Math.floor(Math.random() * 9999)).slice(-4);
   return `HL-${year}-${rnd}`;
 }
 
-function baht(n: number | null | undefined): string {
+export function baht(n: number | null | undefined): string {
   if (n == null || isNaN(n)) return "-";
   return "฿" + Number(n).toLocaleString("th-TH");
 }
 
-function extractCaseId(text: string): string | null {
+export function extractCaseId(text: string): string | null {
   const m = text.match(/HL-?\d{4,}/i);
   return m ? m[0].replace(/-/g, "") : null;
 }
@@ -84,7 +84,7 @@ const STATUS_KEYWORDS = [
   { word: "รอพิจารณา", status: "รอพิจารณา" }
 ];
 
-function extractStatus(text: string): string | null {
+export function extractStatus(text: string): string | null {
   const t = text.toLowerCase();
   for (const s of STATUS_KEYWORDS) {
     if (t.includes(s.word)) return s.status;
