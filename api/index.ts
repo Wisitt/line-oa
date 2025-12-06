@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { handleEvent, handleAdminUpdate } from "./server.js";
-import { getAllApplications, getApplicationById } from "../src/db";
+import { getAllApplications, getApplicationById } from "../src/db.js";
 import { renderDashboardHtml, renderAppHtml } from "../src/render";
 import type { UpdateStatusRequest } from "../src/types";
 import { createServer, ServerResponse } from "http";

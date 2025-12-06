@@ -9,7 +9,7 @@ import {
   updateApplicationStatus,
   getPartnerById,
   insertConversationLog
-} from "../src/db";
+} from "../src/db.js";
 import type { Application, UpdateStatusRequest } from "../src/types";
 
 // LINE Bot client
