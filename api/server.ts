@@ -1,19 +1,20 @@
+// api/server.ts
 // Shared logic (no server runtime) for LINE handlers and admin updates
+
 import "dotenv/config";
 import { Client } from "@line/bot-sdk";
 import {
-  getPartnerByLine,
+  getPartnerByChannelId,
   insertPartner,
   findApplication,
   insertApplication,
   updateApplicationStatus,
   getPartnerById,
-  insertConversationLog,
-  getPartnerByChannelId
-} from "../src/db.js";
+  insertConversationLog
+} from "../src/db";
 import type { Application, UpdateStatusRequest } from "../src/types";
 
-// LINE Bot client
+// ---------- LINE Bot client ----------
 const line = new Client({
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || "",
   channelSecret: process.env.LINE_CHANNEL_SECRET || ""
@@ -29,7 +30,20 @@ export function formatThaiDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "-";
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return "-";
-  const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+  const months = [
+    "ม.ค.",
+    "ก.พ.",
+    "มี.ค.",
+    "เม.ย.",
+    "พ.ค.",
+    "มิ.ย.",
+    "ก.ค.",
+    "ส.ค.",
+    "ก.ย.",
+    "ต.ค.",
+    "พ.ย.",
+    "ธ.ค."
+  ];
   const day = d.getDate();
   const month = months[d.getMonth()];
   const year = (d.getFullYear() + 543) % 100;
@@ -93,50 +107,74 @@ export function extractStatus(text: string): string | null {
   return null;
 }
 
+// --------------------------------------------------
+//  LINE EVENT HANDLER
+// --------------------------------------------------
 export async function handleEvent(event: any) {
   if (event.type !== "message" || event.message.type !== "text") return;
 
   const text: string = event.message.text.trim();
   const lower = text.toLowerCase();
 
+  // ---- ระบุต้นทาง user / group ----
   const source = event.source;
   let channelId: string;
   let channelType: "user" | "group";
 
   if (source.type === "group") {
-    channelId = source.groupId; 
+    channelId = source.groupId;
     channelType = "group";
   } else {
     channelId = source.userId;
     channelType = "user";
   }
 
-  let partner = getPartnerByChannelId(channelId);
-  if (!partner) {
-    insertPartner(`partner-${Date.now()}`, channelId, channelType);
-    partner = getPartnerByChannelId(channelId)!;
+  // ---- ensure partner (กัน error DB ไม่ให้ kill flow หลัก) ----
+  let partner: any | null = null;
+  try {
+    partner = getPartnerByChannelId(channelId);
+    if (!partner) {
+      insertPartner(`partner-${Date.now()}`, channelId, channelType);
+      partner = getPartnerByChannelId(channelId);
+    }
+  } catch (err) {
+    console.error("DB error (partner):", err);
+    partner = null; // ยังให้ flow ตอบ LINE ต่อไปได้
   }
 
-  insertConversationLog({
-    case_id: null,
-    line_user_id: channelId,
-    role: channelType === "group" ? "bank" : "partner",
-    direction: "incoming",
-    channel: channelType === "group" ? "line-group" : "line",
-    message_text: text,
-    raw_payload: event
-  });
+  // ---- log conversation (กัน error DB ไม่ให้ kill flow หลัก) ----
+  try {
+    insertConversationLog({
+      case_id: null,
+      line_user_id: channelId,
+      role: channelType === "group" ? "bank" : "partner",
+      direction: "incoming",
+      channel: channelType === "group" ? "line-group" : "line",
+      message_text: text,
+      raw_payload: event
+    });
+  } catch (err) {
+    console.error("DB error (conversation log):", err);
+  }
 
-
+  // --------------------------------------------------
+  //  เปิดเคสใหม่
+  // --------------------------------------------------
   const CMD_NEW = ["#เปิดเคส", "#สมัครกู้", "ลงทะเบียนกู้:"];
   if (CMD_NEW.some((p) => lower.startsWith(p.toLowerCase()))) {
     let cleaned = text;
+
     CMD_NEW.forEach((p) => {
       if (cleaned.toLowerCase().startsWith(p.toLowerCase())) {
         cleaned = cleaned.slice(p.length).trim();
       }
     });
-    cleaned = cleaned.replace(/(เงินเดือน|รายได้|วงเงิน|ยอดกู้|ทรัพย์|โครงการ)\s*=/g, "|$1=");
+
+    // normalize key=value ให้แยกด้วย |
+    cleaned = cleaned.replace(
+      /(เงินเดือน|รายได้|วงเงิน|ยอดกู้|ทรัพย์|โครงการ)\s*=/g,
+      "|$1="
+    );
     if (cleaned.startsWith("|")) cleaned = cleaned.slice(1).trim();
 
     const parts = cleaned.split("|").map((x) => x.trim());
@@ -147,15 +185,20 @@ export async function handleEvent(event: any) {
       property_type: "",
       project_name: ""
     };
+
     for (const part of parts) {
       const [rawKey = "", rawVal] = part.split("=");
       if (!rawVal) continue;
+
       const key = rawKey.trim();
       const val = rawVal.trim();
       if (!key) continue;
+
       if (key.includes("ชื่อลูกค้า")) a.customer_name = val;
-      else if (key.includes("เงินเดือน") || key.includes("รายได้")) a.monthly_income = Number(val);
-      else if (key.includes("วงเงิน") || key.includes("ยอดกู้")) a.loan_amount = Number(val);
+      else if (key.includes("เงินเดือน") || key.includes("รายได้"))
+        a.monthly_income = Number(val);
+      else if (key.includes("วงเงิน") || key.includes("ยอดกู้"))
+        a.loan_amount = Number(val);
       else if (key.includes("ทรัพย์")) a.property_type = val;
       else if (key.includes("โครงการ")) a.project_name = val;
     }
@@ -163,18 +206,21 @@ export async function handleEvent(event: any) {
     if (!a.customer_name) {
       await line.replyMessage(event.replyToken, {
         type: "text",
-        text: "❌ ข้อมูลไม่ครบ\nตัวอย่าง: #เปิดเคส ชื่อลูกค้า=นายสมชาย | เงินเดือน=85000 | วงเงิน=5000000"
+        text:
+          "❌ ข้อมูลไม่ครบ\n" +
+          "ตัวอย่าง: #เปิดเคส ชื่อลูกค้า=นายสมชาย | เงินเดือน=85000 | วงเงิน=5000000"
       });
       return;
     }
 
     const now = new Date().toISOString();
     const id = genId();
+
     const newApp: Application = {
       id,
       created_at: now,
-      partner_id: partner.id,
-      partner_name: partner.name,
+      partner_id: partner?.id ?? 0,
+      partner_name: partner?.name ?? "",
       bank_name: "KBank",
       customer_name: a.customer_name!,
       monthly_income: a.monthly_income ?? null,
@@ -190,7 +236,18 @@ export async function handleEvent(event: any) {
       officer_name: null,
       updated_at: now
     };
-    insertApplication(newApp);
+
+    try {
+      insertApplication(newApp);
+    } catch (err) {
+      console.error("DB error (insertApplication):", err);
+      await line.replyMessage(event.replyToken, {
+        type: "text",
+        text: "❌ ระบบขัดข้อง ไม่สามารถบันทึกเคสได้ กรุณาลองใหม่อีกครั้ง"
+      });
+      return;
+    }
+
     await line.replyMessage(event.replyToken, {
       type: "text",
       text:
@@ -204,7 +261,9 @@ export async function handleEvent(event: any) {
     return;
   }
 
-  // ---- Check case ----
+  // --------------------------------------------------
+  //  เช็คเคส
+  // --------------------------------------------------
   const CMD_CHECK = ["#เช็คเคส", "#สถานะ", "#เช็คสถานะ"];
   if (CMD_CHECK.some((p) => lower.startsWith(p.toLowerCase()))) {
     const query = text.replace(/^#เช็คเคส|^#สถานะ|^#เช็คสถานะ/i, "").trim();
@@ -215,7 +274,19 @@ export async function handleEvent(event: any) {
       });
       return;
     }
-    const app = findApplication(query);
+
+    let app: Application | undefined;
+    try {
+      app = findApplication(query);
+    } catch (err) {
+      console.error("DB error (findApplication):", err);
+      await line.replyMessage(event.replyToken, {
+        type: "text",
+        text: "❌ ระบบขัดข้อง ไม่สามารถค้นหาเคสได้ กรุณาลองใหม่อีกครั้ง"
+      });
+      return;
+    }
+
     if (!app) {
       await line.replyMessage(event.replyToken, {
         type: "text",
@@ -223,6 +294,7 @@ export async function handleEvent(event: any) {
       });
       return;
     }
+
     const ltvText = app.ltv ? ` (LTV ${app.ltv})` : "";
     await line.replyMessage(event.replyToken, {
       type: "text",
@@ -239,7 +311,9 @@ export async function handleEvent(event: any) {
     return;
   }
 
-  // ---- Default help ----
+  // --------------------------------------------------
+  //  Default help
+  // --------------------------------------------------
   await line.replyMessage(event.replyToken, {
     type: "text",
     text:
@@ -247,23 +321,37 @@ export async function handleEvent(event: any) {
       "• เปิดเคสใหม่:\n" +
       "#เปิดเคส ชื่อลูกค้า=... | เงินเดือน=... | วงเงิน=...\n\n" +
       "• เช็คสถานะเคส:\n" +
-      "#เช็คเคส เ    ลขเคส"
+      "#เช็คเคส เลขเคส"
   });
 }
 
-// ---------- Admin update ----------
+// --------------------------------------------------
+//  ADMIN UPDATE (จาก backoffice)
+// --------------------------------------------------
 export async function handleAdminUpdate(body: UpdateStatusRequest) {
   const { id, status, credit_score, officer_name, collateral_value } = body;
 
-  updateApplicationStatus(
-    id,
-    status,
-    credit_score || null,
-    officer_name || null,
-    collateral_value ?? null
-  );
+  try {
+    updateApplicationStatus(
+      id,
+      status,
+      credit_score || null,
+      officer_name || null,
+      collateral_value ?? null
+    );
+  } catch (err) {
+    console.error("DB error (updateApplicationStatus):", err);
+    return { ok: false };
+  }
 
-  const app = findApplication(id);
+  let app: Application | undefined;
+  try {
+    app = findApplication(id);
+  } catch (err) {
+    console.error("DB error (findApplication in admin):", err);
+    return { ok: false };
+  }
+
   if (!app) return { ok: false };
 
   const partner = getPartnerById(app.partner_id);
@@ -280,15 +368,19 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
       text: pushText
     });
 
-    insertConversationLog({
-      case_id: id,
-      line_user_id: partner.channel_id,
-      role: "bot",
-      direction: "outgoing",
-      channel: partner.channel_type === "group" ? "line-group" : "line",
-      message_text: pushText,
-      raw_payload: null
-    });
+    try {
+      insertConversationLog({
+        case_id: id,
+        line_user_id: partner.channel_id,
+        role: "bot",
+        direction: "outgoing",
+        channel: partner.channel_type === "group" ? "line-group" : "line",
+        message_text: pushText,
+        raw_payload: null
+      });
+    } catch (err) {
+      console.error("DB error (insertConversationLog in admin):", err);
+    }
   }
 
   return { ok: true };
