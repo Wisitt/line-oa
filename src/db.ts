@@ -5,22 +5,15 @@ import { join } from "path";
 import type { Application, Partner } from "./types";
 
 const bundledPath = join(process.cwd(), "loan.db");
-const runtimePath =
-  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
-    ? "/tmp/loan.db"
-    : bundledPath;
+const runtimePath = process.env.VERCEL ? "/tmp/loan.db" : bundledPath;
 
 if (runtimePath !== bundledPath) {
-  try {
-    if (existsSync(bundledPath)) {
-      copyFileSync(bundledPath, runtimePath);
-    }
-  } catch (err) {
-    console.error("Failed to copy DB to /tmp", err);
+  if (existsSync(bundledPath)) {
+    copyFileSync(bundledPath, runtimePath);
   }
 }
-
 const db = new Database(runtimePath);
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS partners (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
