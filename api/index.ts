@@ -4,6 +4,7 @@ import { getAllApplications, getApplicationById } from "../src/db.js";
 import { renderDashboardHtml, renderAppHtml } from "../src/render.js";
 import type { UpdateStatusRequest } from "../src/types";
 import { createServer, ServerResponse } from "http";
+
 async function readRawBody(req: VercelRequest): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -31,6 +32,12 @@ export default async function handler(
 
   if (req.method === "GET" && path === "/") {
     res.writeHead(302, { Location: "/admin/dashboard" }).end();
+    return;
+  }
+
+  // สำหรับ Verify webhook จาก LINE (GET /webhook)
+  if (req.method === "GET" && path === "/webhook") {
+    res.status(200).send("OK");
     return;
   }
 
@@ -74,13 +81,19 @@ export default async function handler(
   if (req.method === "POST" && path === "/webhook") {
     const body = await readJson<any>(req);
     const events = body?.events ?? [];
+
     for (const ev of events) {
       try {
         await handleEvent(ev);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error in single event:", err);
+        const data = err?.originalError?.response?.data;
+        if (data) {
+          console.error("LINE API error body:", JSON.stringify(data, null, 2));
+        }
       }
     }
+
     res.status(200).send("OK");
     return;
   }

@@ -21,6 +21,19 @@ const line = new Client({
   channelSecret: process.env.LINE_CHANNEL_SECRET || ""
 });
 
+// ---------- Helper: reply แบบกันตาย ----------
+async function safeReply(event: any, message: string) {
+  try {
+    await line.replyMessage(event.replyToken, {
+      type: "text",
+      text: message
+    });
+  } catch (err: any) {
+    const data = err?.originalError?.response?.data;
+    console.error("LINE reply error:", data || err);
+  }
+}
+
 // ---------- Helpers ----------
 export function formatBaht(num: number | null | undefined): string {
   if (num == null || isNaN(num)) return "-";
@@ -130,23 +143,23 @@ export async function handleEvent(event: any) {
     channelType = "user";
   }
 
-let partner = getPartnerByChannelId(channelId);
-if (!partner) {
-  insertPartner(`partner-${Date.now()}`, channelId, channelType);
-  partner = getPartnerByChannelId(channelId)!;
-}
-
+  // partner + log
+  let partner = getPartnerByChannelId(channelId);
+  if (!partner) {
+    insertPartner(`partner-${Date.now()}`, channelId, channelType);
+    partner = getPartnerByChannelId(channelId)!;
+  }
 
   try {
-insertConversationLog({
-  case_id: null,
-  line_user_id: channelId,
-  role: channelType === "group" ? "bank" : "partner",
-  direction: "incoming",
-  channel: channelType === "group" ? "line-group" : "line",
-  message_text: text,
-  raw_payload: event
-});
+    insertConversationLog({
+      case_id: null,
+      line_user_id: channelId,
+      role: channelType === "group" ? "bank" : "partner",
+      direction: "incoming",
+      channel: channelType === "group" ? "line-group" : "line",
+      message_text: text,
+      raw_payload: event
+    });
   } catch (err) {
     console.error("DB error (conversation log):", err);
   }
@@ -198,12 +211,10 @@ insertConversationLog({
     }
 
     if (!a.customer_name) {
-      await line.replyMessage(event.replyToken, {
-        type: "text",
-        text:
-          "❌ ข้อมูลไม่ครบ\n" +
-          "ตัวอย่าง: #เปิดเคส ชื่อลูกค้า=นายสมชาย | เงินเดือน=85000 | วงเงิน=5000000"
-      });
+      await safeReply(
+        event,
+        "❌ ข้อมูลไม่ครบ\nตัวอย่าง: #เปิดเคส ชื่อลูกค้า=นายสมชาย | เงินเดือน=85000 | วงเงิน=5000000"
+      );
       return;
     }
 
@@ -213,8 +224,8 @@ insertConversationLog({
     const newApp: Application = {
       id,
       created_at: now,
-      partner_id: partner.id, 
-       partner_name: partner?.name ?? "",
+      partner_id: partner.id,
+      partner_name: partner?.name ?? "",
       bank_name: "KBank",
       customer_name: a.customer_name!,
       monthly_income: a.monthly_income ?? null,
@@ -235,23 +246,22 @@ insertConversationLog({
       insertApplication(newApp);
     } catch (err) {
       console.error("DB error (insertApplication):", err);
-      await line.replyMessage(event.replyToken, {
-        type: "text",
-        text: "❌ ระบบขัดข้อง ไม่สามารถบันทึกเคสได้ กรุณาลองใหม่อีกครั้ง"
-      });
+      await safeReply(
+        event,
+        "❌ ระบบขัดข้อง ไม่สามารถบันทึกเคสได้ กรุณาลองใหม่อีกครั้ง"
+      );
       return;
     }
 
-    await line.replyMessage(event.replyToken, {
-      type: "text",
-      text:
-        `✅ เปิดเคสใหม่แล้ว\n` +
+    await safeReply(
+      event,
+      `✅ เปิดเคสใหม่แล้ว\n` +
         `เลขเคส: ${id}\n` +
         `ชื่อลูกค้า: ${a.customer_name}\n` +
         `เงินเดือน: ${baht(a.monthly_income)}\n` +
         `ยอดกู้: ${baht(a.loan_amount)}\n` +
         `โครงการ: ${a.project_name}`
-    });
+    );
     return;
   }
 
@@ -262,10 +272,7 @@ insertConversationLog({
   if (CMD_CHECK.some((p) => lower.startsWith(p.toLowerCase()))) {
     const query = text.replace(/^#เช็คเคส|^#สถานะ|^#เช็คสถานะ/i, "").trim();
     if (!query) {
-      await line.replyMessage(event.replyToken, {
-        type: "text",
-        text: "กรุณาระบุเลขเคส หรือชื่อลูกค้า"
-      });
+      await safeReply(event, "กรุณาระบุเลขเคส หรือชื่อลูกค้า");
       return;
     }
 
@@ -274,26 +281,22 @@ insertConversationLog({
       app = findApplication(query);
     } catch (err) {
       console.error("DB error (findApplication):", err);
-      await line.replyMessage(event.replyToken, {
-        type: "text",
-        text: "❌ ระบบขัดข้อง ไม่สามารถค้นหาเคสได้ กรุณาลองใหม่อีกครั้ง"
-      });
+      await safeReply(
+        event,
+        "❌ ระบบขัดข้อง ไม่สามารถค้นหาเคสได้ กรุณาลองใหม่อีกครั้ง"
+      );
       return;
     }
 
     if (!app) {
-      await line.replyMessage(event.replyToken, {
-        type: "text",
-        text: `❌ ไม่พบเคส "${query}"`
-      });
+      await safeReply(event, `❌ ไม่พบเคส "${query}"`);
       return;
     }
 
     const ltvText = app.ltv ? ` (LTV ${app.ltv})` : "";
-    await line.replyMessage(event.replyToken, {
-      type: "text",
-      text:
-        `📌 รายละเอียดเคส\n` +
+    await safeReply(
+      event,
+      `📌 รายละเอียดเคส\n` +
         `เลขเคส: ${app.id}\n` +
         `ชื่อลูกค้า: ${app.customer_name}\n` +
         `เงินเดือน: ${baht(app.monthly_income)}\n` +
@@ -301,22 +304,21 @@ insertConversationLog({
         `ยอดกู้: ${baht(app.loan_amount)}${ltvText}\n` +
         `สถานะ: ${app.status}\n` +
         `เครดิตสกอร์: ${app.credit_score ?? "-"}`
-    });
+    );
     return;
   }
 
   // --------------------------------------------------
   //  Default help
   // --------------------------------------------------
-  await line.replyMessage(event.replyToken, {
-    type: "text",
-    text:
-      "สวัสดีครับ ระบบสินเชื่อบ้าน\n\n" +
+  await safeReply(
+    event,
+    "สวัสดีครับ ระบบสินเชื่อบ้าน\n\n" +
       "• เปิดเคสใหม่:\n" +
       "#เปิดเคส ชื่อลูกค้า=... | เงินเดือน=... | วงเงิน=...\n\n" +
       "• เช็คสถานะเคส:\n" +
       "#เช็คเคส เลขเคส"
-  });
+  );
 }
 
 // --------------------------------------------------
@@ -348,27 +350,25 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
     `เครดิตสกอร์: ${credit_score ?? "-"}\n` +
     (officer_name ? `โดย: ${officer_name}` : "");
 
-  // 🔹 ดึงทุก channel ที่เกี่ยวกับเคสนี้จาก logs
   const channels = getChannelsByCaseId(id);
 
-  // ถ้าไม่เจออะไรเลย fallback เป็น partner เดิม
+  // fallback partner เดิม ถ้าไม่มี log อะไรเลย
   if (!channels.length) {
-const partner = getPartnerById(app.partner_id);
-if (partner) {
-  const targetId = partner.channel_id; // ตอนนี้ field ชื่อนี้แน่นอน
-  await line.pushMessage(targetId, { type: "text", text: pushText });
+    const partner = getPartnerById(app.partner_id);
+    if (partner) {
+      const targetId = partner.channel_id;
+      await line.pushMessage(targetId, { type: "text", text: pushText });
 
-  insertConversationLog({
-    case_id: id,
-    line_user_id: targetId,
-    role: "bot",
-    direction: "outgoing",
-    channel: partner.channel_type === "group" ? "line-group" : "line",
-    message_text: pushText,
-    raw_payload: null
-  });
-}
-
+      insertConversationLog({
+        case_id: id,
+        line_user_id: targetId,
+        role: "bot",
+        direction: "outgoing",
+        channel: partner.channel_type === "group" ? "line-group" : "line",
+        message_text: pushText,
+        raw_payload: null
+      });
+    }
   }
 
   for (const ch of channels) {
