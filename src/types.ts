@@ -4,7 +4,7 @@ export interface Partner {
   id: number;
   name: string;
   channel_id: string;
-  channel_type: "user" | "group" | "room";
+  channel_type: "user" | "group";
 }
 
 

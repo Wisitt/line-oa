@@ -65,12 +65,15 @@ db.exec(`
     created_at TEXT
   );
 `);
+export type ConversationChannel = "line" | "line-group" | "backoffice";
+
+
 export interface ConversationLog {
   case_id: string | null;
   line_user_id: string | null;
   role: "partner" | "bank" | "bot";
   direction: "incoming" | "outgoing";
-  channel: "line" | "line-group" | "backoffice";
+  channel: ConversationChannel;
   message_text: string;
   raw_payload?: any;
 }
@@ -105,23 +108,16 @@ export function insertConversationLog(log: ConversationLog): void {
 
 // ---------- HELPERS ----------
 
-// src/db.ts
 export function getPartnerByChannelId(channelId: string): Partner | undefined {
-  return db
-    .prepare("SELECT * FROM partners WHERE channel_id = ?")
-    .get(channelId) as Partner | undefined;
+  return db.prepare("SELECT * FROM partners WHERE channel_id = ?")
+           .get(channelId) as Partner | undefined;
 }
 
-export function insertPartner(
-  name: string,
-  channelId: string,
-  channelType: "user" | "group" | "room"
-): void {
+export function insertPartner(name: string, channelId: string, channelType: "user"|"group"): void {
   db.prepare(
     "INSERT INTO partners (name, channel_id, channel_type) VALUES (?, ?, ?)"
   ).run(name, channelId, channelType);
 }
-
 
 export function getPartnerByLine(lineId: string): Partner | undefined {
   return db.prepare("SELECT * FROM partners WHERE line_user_id = ?").get(lineId) as

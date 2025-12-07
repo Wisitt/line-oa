@@ -93,50 +93,41 @@ export function extractStatus(text: string): string | null {
   return null;
 }
 
-// ---------- LINE event handler ----------
 export async function handleEvent(event: any) {
   if (event.type !== "message" || event.message.type !== "text") return;
 
   const text: string = event.message.text.trim();
   const lower = text.toLowerCase();
 
-  const sourceType = event.source.type as "user" | "group" | "room";
-  const userId = event.source.userId;
-  const groupId = event.source.groupId;
-  const roomId = event.source.roomId;
+  const source = event.source;
+  let channelId: string;
+  let channelType: "user" | "group";
 
-  // ถ้าคุยในกลุ่ม → ให้ถือว่าช่องทางหลักคือ group
-  const channelId =
-    sourceType === "group" ? groupId :
-    sourceType === "room"  ? roomId :
-    userId;
-
-  if (!channelId) return; // กัน null safety
+  if (source.type === "group") {
+    channelId = source.groupId; 
+    channelType = "group";
+  } else {
+    channelId = source.userId;
+    channelType = "user";
+  }
 
   let partner = getPartnerByChannelId(channelId);
   if (!partner) {
-    const name =
-      sourceType === "group"
-        ? `group-${Date.now()}`
-        : `partner-${Date.now()}`;
-
-    insertPartner(name, channelId, sourceType);
+    insertPartner(`partner-${Date.now()}`, channelId, channelType);
     partner = getPartnerByChannelId(channelId)!;
   }
 
-  const role: "partner" | "bank" = "partner";
-  const caseId = extractCaseId(text);
   insertConversationLog({
-    case_id: caseId,
-    line_user_id: userId,
-    role,
+    case_id: null,
+    line_user_id: channelId,
+    role: channelType === "group" ? "bank" : "partner",
     direction: "incoming",
-    channel: "line",
+    channel: channelType === "group" ? "line-group" : "line",
     message_text: text,
     raw_payload: event
   });
 
-  // ---- Create case ----
+
   const CMD_NEW = ["#เปิดเคส", "#สมัครกู้", "ลงทะเบียนกู้:"];
   if (CMD_NEW.some((p) => lower.startsWith(p.toLowerCase()))) {
     let cleaned = text;
