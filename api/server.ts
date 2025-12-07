@@ -130,30 +130,23 @@ export async function handleEvent(event: any) {
     channelType = "user";
   }
 
-  // ---- ensure partner (กัน error DB ไม่ให้ kill flow หลัก) ----
-  let partner: any | null = null;
-  try {
-    partner = getPartnerByChannelId(channelId);
-    if (!partner) {
-      insertPartner(`partner-${Date.now()}`, channelId, channelType);
-      partner = getPartnerByChannelId(channelId);
-    }
-  } catch (err) {
-    console.error("DB error (partner):", err);
-    partner = null; // ยังให้ flow ตอบ LINE ต่อไปได้
-  }
+let partner = getPartnerByChannelId(channelId);
+if (!partner) {
+  insertPartner(`partner-${Date.now()}`, channelId, channelType);
+  partner = getPartnerByChannelId(channelId)!;
+}
 
-  // ---- log conversation (กัน error DB ไม่ให้ kill flow หลัก) ----
+
   try {
-    insertConversationLog({
-      case_id: null,
-      line_user_id: channelId,
-      role: channelType === "group" ? "bank" : "partner",
-      direction: "incoming",
-      channel: channelType === "group" ? "line-group" : "line",
-      message_text: text,
-      raw_payload: event
-    });
+insertConversationLog({
+  case_id: null,
+  line_user_id: channelId,
+  role: channelType === "group" ? "bank" : "partner",
+  direction: "incoming",
+  channel: channelType === "group" ? "line-group" : "line",
+  message_text: text,
+  raw_payload: event
+});
   } catch (err) {
     console.error("DB error (conversation log):", err);
   }
@@ -360,13 +353,22 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
 
   // ถ้าไม่เจออะไรเลย fallback เป็น partner เดิม
   if (!channels.length) {
-    const partner = getPartnerById(app.partner_id);
-    if (partner) {
-      channels.push({
-        channel_id: partner.channel_id,
-        channel_type: partner.channel_type
-      });
-    }
+const partner = getPartnerById(app.partner_id);
+if (partner) {
+  const targetId = partner.channel_id; // ตอนนี้ field ชื่อนี้แน่นอน
+  await line.pushMessage(targetId, { type: "text", text: pushText });
+
+  insertConversationLog({
+    case_id: id,
+    line_user_id: targetId,
+    role: "bot",
+    direction: "outgoing",
+    channel: partner.channel_type === "group" ? "line-group" : "line",
+    message_text: pushText,
+    raw_payload: null
+  });
+}
+
   }
 
   for (const ch of channels) {

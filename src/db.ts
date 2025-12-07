@@ -4,7 +4,6 @@ import { existsSync, copyFileSync } from "fs";
 import { join } from "path";
 import type { Application, Partner } from "./types";
 
-// Use writable location on Vercel (read-only /var/task). Copy bundled DB to /tmp.
 const bundledPath = join(process.cwd(), "loan.db");
 const runtimePath =
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
@@ -22,14 +21,12 @@ if (runtimePath !== bundledPath) {
 }
 
 const db = new Database(runtimePath);
-
-// ---------- CREATE TABLES ----------
 db.exec(`
   CREATE TABLE IF NOT EXISTS partners (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
-    channel_id TEXT UNIQUE,     -- เก็บ userId หรือ groupId
-    channel_type TEXT           -- 'user' | 'group' | 'room'
+    channel_id TEXT UNIQUE,
+    channel_type TEXT DEFAULT 'user'
   );
 
   CREATE TABLE IF NOT EXISTS applications (
@@ -57,9 +54,9 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     case_id TEXT,
     line_user_id TEXT,
-    role TEXT,         -- 'partner' | 'bank' | 'bot'
-    direction TEXT,    -- 'incoming' | 'outgoing'
-    channel TEXT,      -- 'line' | 'backoffice'
+    role TEXT,
+    direction TEXT,
+    channel TEXT,
     message_text TEXT,
     raw_payload TEXT,
     created_at TEXT
@@ -109,24 +106,32 @@ export function insertConversationLog(log: ConversationLog): void {
 // ---------- HELPERS ----------
 
 export function getPartnerByChannelId(channelId: string): Partner | undefined {
-  return db.prepare("SELECT * FROM partners WHERE channel_id = ?")
-           .get(channelId) as Partner | undefined;
+  return db
+    .prepare("SELECT * FROM partners WHERE channel_id = ?")
+    .get(channelId) as Partner | undefined;
 }
 
-export function insertPartner(name: string, channelId: string, channelType: "user"|"group"): void {
+export function insertPartner(
+  name: string,
+  channelId: string,
+  channelType: "user" | "group"
+): void {
   db.prepare(
-    "INSERT INTO partners (name, channel_id, channel_type) VALUES (?, ?, ?)"
+    `
+      INSERT INTO partners (name, channel_id, channel_type)
+      VALUES (?, ?, ?)
+    `
   ).run(name, channelId, channelType);
+}
+
+export function getPartnerById(id: number): Partner | undefined {
+  return db
+    .prepare("SELECT * FROM partners WHERE id = ?")
+    .get(id) as Partner | undefined;
 }
 
 export function getPartnerByLine(lineId: string): Partner | undefined {
   return db.prepare("SELECT * FROM partners WHERE line_user_id = ?").get(lineId) as
-    | Partner
-    | undefined;
-}
-
-export function getPartnerById(id: number): Partner | undefined {
-  return db.prepare("SELECT * FROM partners WHERE id = ?").get(id) as
     | Partner
     | undefined;
 }

@@ -1,12 +1,23 @@
 // src/types.ts
 
+export type ChannelKind = "line" | "line-group" | "backoffice";
+
 export interface Partner {
   id: number;
   name: string;
-  channel_id: string;
-  channel_type: "user" | "group";
+  channel_id: string;              // userId หรือ groupId
+  channel_type: "user" | "group";  // แยกว่ามาจาก 1:1 หรือ group
 }
 
+export interface ConversationLog {
+  case_id: string | null;
+  line_user_id: string | null; // เก็บ userId หรือ groupId ก็ได้ เหมือนเดิม
+  role: "partner" | "bank" | "bot";
+  direction: "incoming" | "outgoing";
+  channel: ChannelKind;       // ตอนนี้รองรับ "line-group" แล้ว
+  message_text: string;
+  raw_payload?: any;
+}
 
 // Model เคสกู้บ้านให้ใกล้เคียง loan back office จริง ๆ
 export interface Application {
