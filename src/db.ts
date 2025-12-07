@@ -259,6 +259,21 @@ export function getApplicationById(id: string): Application | undefined {
     .get(id) as Application | undefined;
 }
 
+export function getChannelsByCaseId(caseId: string): { channel_id: string; channel_type: "user" | "group" }[] {
+  const rows = db
+    .prepare(
+      `
+      SELECT DISTINCT p.channel_id, p.channel_type
+      FROM conversation_logs c
+      JOIN partners p ON c.line_user_id = p.channel_id
+      WHERE c.case_id = ?
+    `
+    )
+    .all(caseId) as { channel_id: string; channel_type: "user" | "group" }[];
+
+  return rows;
+}
+
 
 
 

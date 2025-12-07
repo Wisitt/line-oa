@@ -10,7 +10,8 @@ import {
   insertApplication,
   updateApplicationStatus,
   getPartnerById,
-  insertConversationLog
+  insertConversationLog,
+  getChannelsByCaseId
 } from "../src/db.js";
 import type { Application, UpdateStatusRequest } from "../src/types";
 
@@ -219,8 +220,8 @@ export async function handleEvent(event: any) {
     const newApp: Application = {
       id,
       created_at: now,
-      partner_id: partner?.id ?? 0,
-      partner_name: partner?.name ?? "",
+      partner_id: partner.id, 
+       partner_name: partner?.name ?? "",
       bank_name: "KBank",
       customer_name: a.customer_name!,
       monthly_income: a.monthly_income ?? null,
@@ -344,26 +345,32 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
     return { ok: false };
   }
 
-  let app: Application | undefined;
-  try {
-    app = findApplication(id);
-  } catch (err) {
-    console.error("DB error (findApplication in admin):", err);
-    return { ok: false };
-  }
-
+  const app = findApplication(id);
   if (!app) return { ok: false };
 
-  const partner = getPartnerById(app.partner_id);
-  if (partner) {
-    const pushText =
-      `📢 อัปเดตเคส\n` +
-      `เลขเคส: ${id}\n` +
-      `สถานะ: ${status}\n` +
-      `เครดิตสกอร์: ${credit_score ?? "-"}\n` +
-      (officer_name ? `โดย: ${officer_name}` : "");
+  const pushText =
+    `📢 อัปเดตเคส\n` +
+    `เลขเคส: ${id}\n` +
+    `สถานะ: ${status}\n` +
+    `เครดิตสกอร์: ${credit_score ?? "-"}\n` +
+    (officer_name ? `โดย: ${officer_name}` : "");
 
-    await line.pushMessage(partner.channel_id, {
+  // 🔹 ดึงทุก channel ที่เกี่ยวกับเคสนี้จาก logs
+  const channels = getChannelsByCaseId(id);
+
+  // ถ้าไม่เจออะไรเลย fallback เป็น partner เดิม
+  if (!channels.length) {
+    const partner = getPartnerById(app.partner_id);
+    if (partner) {
+      channels.push({
+        channel_id: partner.channel_id,
+        channel_type: partner.channel_type
+      });
+    }
+  }
+
+  for (const ch of channels) {
+    await line.pushMessage(ch.channel_id, {
       type: "text",
       text: pushText
     });
@@ -371,10 +378,10 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
     try {
       insertConversationLog({
         case_id: id,
-        line_user_id: partner.channel_id,
+        line_user_id: ch.channel_id,
         role: "bot",
         direction: "outgoing",
-        channel: partner.channel_type === "group" ? "line-group" : "line",
+        channel: ch.channel_type === "group" ? "line-group" : "line",
         message_text: pushText,
         raw_payload: null
       });
