@@ -272,7 +272,20 @@ export function getChannelsByCaseId(caseId: string): { channel_id: string; chann
   return rows;
 }
 
+export function deleteApplicationById(id: string) {
+  db.prepare(`DELETE FROM applications WHERE id = ?`).run(id);
+}
+
+export function deletePartnerById(id: number) {
+  db.prepare(`DELETE FROM partners WHERE id = ?`).run(id);
+}
+
+export function deleteLogsByCaseId(caseId: string) {
+  db.prepare(`DELETE FROM conversation_logs WHERE case_id = ?`).run(caseId);
+}
 
 
 
 export default db;
+
+

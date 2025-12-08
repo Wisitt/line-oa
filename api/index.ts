@@ -48,6 +48,36 @@ export default async function handler(
     return;
   }
 
+  
+  if (req.method === "POST" && path.startsWith("/admin/delete-case/")) {
+  const id = decodeURIComponent(path.split("/").pop() || "");
+
+  const { deleteApplicationById, deleteLogsByCaseId } = require("../src/db.js");
+
+  // ลบข้อมูลหลัก
+  deleteApplicationById(id);
+
+  // ลบ log ที่เกี่ยวข้องทั้งหมด
+  deleteLogsByCaseId(id);
+
+  res.status(200).send(`Deleted case: ${id}`);
+  return;
+}
+
+
+if (req.method === "POST" && path.startsWith("/admin/delete-partner/")) {
+  const id = Number(path.split("/").pop() || "");
+
+  const { deletePartnerById } = require("../src/db.js");
+
+  deletePartnerById(id);
+
+  res.status(200).send(`Deleted partner: ${id}`);
+  return;
+}
+
+
+
   if (req.method === "GET" && path.startsWith("/admin/app/")) {
     const id = decodeURIComponent(path.split("/").pop() || "");
     const application = getApplicationById(id);
@@ -108,6 +138,7 @@ export default async function handler(
   res.status(404).send("Not Found");
 }
 
+
 // ---------- Local dev server ----------
 function enhanceResponse(res: ServerResponse): VercelResponse {
   const r = res as any as VercelResponse;
@@ -131,6 +162,8 @@ function enhanceResponse(res: ServerResponse): VercelResponse {
   };
   return r;
 }
+
+
 
 if (!process.env.VERCEL) {
   const port = Number(process.env.PORT) || 3000;
