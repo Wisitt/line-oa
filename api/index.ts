@@ -13,6 +13,8 @@ import { renderDashboardHtml, renderAppHtml } from "../src/render.js";
 import type { UpdateStatusRequest } from "../src/types";
 import { createServer, ServerResponse } from "http";
 
+// ---------- utils: body reader ----------
+
 async function readRawBody(req: VercelRequest): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -26,10 +28,13 @@ async function readJson<T = any>(req: VercelRequest): Promise<T | null> {
   try {
     const raw = await readRawBody(req);
     return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
+  } catch (err) {
+    console.error("Failed to parse JSON body:", err);
     return null;
   }
 }
+
+// ---------- main handler (for Vercel) ----------
 
 export default async function handler(
   req: VercelRequest,
@@ -38,135 +43,175 @@ export default async function handler(
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   const path = url.pathname;
 
-  if (req.method === "GET" && path === "/") {
-    res.writeHead(302, { Location: "/admin/dashboard" }).end();
-    return;
-  }
-
-  // สำหรับ Verify webhook จาก LINE (GET /webhook)
-  if (req.method === "GET" && path === "/webhook") {
-    res.status(200).send("OK");
-    return;
-  }
-
-  if (req.method === "GET" && path === "/admin/dashboard") {
-    const tab = (url.searchParams.get("tab") as string) || "all";
-    const apps = await getAllApplications();
-    const html = renderDashboardHtml(apps, tab);
-    res.status(200).setHeader("Content-Type", "text/html; charset=utf-8").send(html);
-    return;
-  }
-
-  // ลบเคส + log ที่เกี่ยวข้องทั้งหมด
-  if (req.method === "POST" && path.startsWith("/admin/delete-case/")) {
-    const id = decodeURIComponent(path.split("/").pop() || "");
-
-    await deleteApplicationById(id);
-    await deleteLogsByCaseId(id);
-
-    res.status(200).send(`Deleted case: ${id}`);
-    return;
-  }
-
-  // ลบ partner ตาม id
-  if (req.method === "POST" && path.startsWith("/admin/delete-partner/")) {
-    const id = Number(path.split("/").pop() || "");
-
-    if (!Number.isFinite(id)) {
-      res.status(400).send("Invalid partner id");
+  try {
+    // redirect root -> dashboard
+    if (req.method === "GET" && path === "/") {
+      res.writeHead(302, { Location: "/admin/dashboard" }).end();
       return;
     }
 
-    await deletePartnerById(id);
-
-    res.status(200).send(`Deleted partner: ${id}`);
-    return;
-  }
-
-  if (req.method === "GET" && path.startsWith("/admin/app/")) {
-    const id = decodeURIComponent(path.split("/").pop() || "");
-    const application = await getApplicationById(id);
-    if (!application) {
-      res.status(404).send("ไม่พบเคส");
+    // สำหรับ Verify webhook จาก LINE (GET /webhook)
+    if (req.method === "GET" && path === "/webhook") {
+      res.status(200).send("OK");
       return;
     }
-    const html = renderAppHtml(application);
-    res.status(200).setHeader("Content-Type", "text/html; charset=utf-8").send(html);
-    return;
-  }
 
-  if (req.method === "POST" && path.startsWith("/admin/app/")) {
-    const id = decodeURIComponent(path.split("/").pop() || "");
-    const raw = await readRawBody(req);
-    const form = new URLSearchParams(raw);
-    const payload: UpdateStatusRequest = {
-      id,
-      status: form.get("status") || "รอพิจารณา",
-      credit_score: form.get("credit_score") || undefined,
-      officer_name: form.get("officer_name") || undefined,
-      collateral_value: form.get("collateral_value")
-        ? Number(form.get("collateral_value"))
-        : undefined
-    };
-    await handleAdminUpdate(payload);
-    res.writeHead(302, { Location: "/admin/dashboard" }).end();
-    return;
-  }
+    // ---------- DASHBOARD ----------
+    if (req.method === "GET" && path === "/admin/dashboard") {
+      const tab = (url.searchParams.get("tab") as string) || "all";
+      const apps = await getAllApplications();
+      const html = renderDashboardHtml(apps, tab);
+      res
+        .status(200)
+        .setHeader("Content-Type", "text/html; charset=utf-8")
+        .send(html);
+      return;
+    }
 
-  if (req.method === "POST" && path === "/webhook") {
-    const body = await readJson<any>(req);
-    const events = body?.events ?? [];
+    // ---------- DELETE CASE + LOGS ----------
+    if (req.method === "POST" && path.startsWith("/admin/delete-case/")) {
+      const id = decodeURIComponent(path.split("/").pop() || "");
 
-    for (const ev of events) {
-      try {
-        await handleEvent(ev);
-      } catch (err: any) {
-        console.error("Error in single event:", err);
-        const data = err?.originalError?.response?.data;
-        if (data) {
-          console.error("LINE API error body:", JSON.stringify(data, null, 2));
+      if (!id) {
+        res.status(400).send("Invalid case id");
+        return;
+      }
+
+      await deleteLogsByCaseId(id);
+      await deleteApplicationById(id);
+
+      res.status(200).send(`Deleted case: ${id}`);
+      return;
+    }
+
+    // ---------- DELETE PARTNER ----------
+    if (req.method === "POST" && path.startsWith("/admin/delete-partner/")) {
+      const idStr = path.split("/").pop() || "";
+      const id = Number(idStr);
+
+      if (!Number.isFinite(id)) {
+        res.status(400).send("Invalid partner id");
+        return;
+      }
+
+      await deletePartnerById(id);
+      res.status(200).send(`Deleted partner: ${id}`);
+      return;
+    }
+
+    // ---------- APP DETAIL ----------
+    if (req.method === "GET" && path.startsWith("/admin/app/")) {
+      const id = decodeURIComponent(path.split("/").pop() || "");
+      const application = await getApplicationById(id);
+
+      if (!application) {
+        res.status(404).send("ไม่พบเคส");
+        return;
+      }
+
+      const html = renderAppHtml(application);
+      res
+        .status(200)
+        .setHeader("Content-Type", "text/html; charset=utf-8")
+        .send(html);
+      return;
+    }
+
+    // ---------- UPDATE APP (FORM POST) ----------
+    if (req.method === "POST" && path.startsWith("/admin/app/")) {
+      const id = decodeURIComponent(path.split("/").pop() || "");
+      const raw = await readRawBody(req);
+      const form = new URLSearchParams(raw);
+
+      const payload: UpdateStatusRequest = {
+        id,
+        status: form.get("status") || "รอพิจารณา",
+        credit_score: form.get("credit_score") || undefined,
+        officer_name: form.get("officer_name") || undefined,
+        collateral_value: form.get("collateral_value")
+          ? Number(form.get("collateral_value"))
+          : undefined
+      };
+
+      await handleAdminUpdate(payload);
+      res.writeHead(302, { Location: "/admin/dashboard" }).end();
+      return;
+    }
+
+    // ---------- LINE WEBHOOK ----------
+    if (req.method === "POST" && path === "/webhook") {
+      const body = (await readJson<any>(req)) || {};
+      const events = body.events ?? [];
+
+      for (const ev of events) {
+        try {
+          await handleEvent(ev);
+        } catch (err: any) {
+          console.error("Error in single event:", err);
+          const data = err?.originalError?.response?.data;
+          if (data) {
+            console.error("LINE API error body:", JSON.stringify(data, null, 2));
+          }
         }
       }
+
+      res.status(200).send("OK");
+      return;
     }
 
-    res.status(200).send("OK");
-    return;
-  }
+    // ---------- ADMIN UPDATE (JSON API) ----------
+    if (req.method === "POST" && path === "/admin/update") {
+      const body =
+        (await readJson<UpdateStatusRequest>(req)) || ({} as UpdateStatusRequest);
+      const result = await handleAdminUpdate(body);
+      res.status(200).json(result);
+      return;
+    }
 
-  if (req.method === "POST" && path === "/admin/update") {
-    const body = (await readJson<UpdateStatusRequest>(req)) || ({} as UpdateStatusRequest);
-    const result = await handleAdminUpdate(body);
-    res.status(200).json(result);
-    return;
+    // ---------- NOT FOUND ----------
+    res.status(404).send("Not Found");
+  } catch (err) {
+    console.error("Unhandled error in handler:", err);
+    // กันไม่ให้กลายเป็น Unhandled Rejection บน Vercel
+    if (!res.headersSent) {
+      res.status(500).send("Internal Server Error");
+    }
   }
-
-  res.status(404).send("Not Found");
 }
 
 // ---------- Local dev server ----------
 function enhanceResponse(res: ServerResponse): VercelResponse {
   const r = res as any as VercelResponse;
+
   r.status = (code: number) => {
     res.statusCode = code;
     return r;
   };
+
   r.json = (data: any) => {
-    if (!res.getHeader("Content-Type")) res.setHeader("Content-Type", "application/json");
+    if (!res.getHeader("Content-Type")) {
+      res.setHeader("Content-Type", "application/json");
+    }
     res.end(JSON.stringify(data));
     return r;
   };
+
   r.send = (data: any) => {
     if (typeof data === "object" && !Buffer.isBuffer(data)) {
-      if (!res.getHeader("Content-Type")) res.setHeader("Content-Type", "application/json");
+      if (!res.getHeader("Content-Type")) {
+        res.setHeader("Content-Type", "application/json");
+      }
       res.end(JSON.stringify(data));
     } else {
       res.end(data);
     }
     return r;
   };
+
   return r;
 }
 
+// รันเป็น local dev server ตอนไม่ได้อยู่บน Vercel
 if (!process.env.VERCEL) {
   const port = Number(process.env.PORT) || 3000;
   createServer((req, res) => {
