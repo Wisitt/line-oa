@@ -1,19 +1,30 @@
 // src/db.ts
 import Database from "better-sqlite3";
-import { existsSync, copyFileSync } from "fs";
+import { existsSync } from "fs";
 import { join } from "path";
 import type { Application, Partner } from "./types";
 
-const bundledPath = join(process.cwd(), "loan.db");
-const runtimePath = process.env.VERCEL ? "/tmp/loan.db" : bundledPath;
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
-if (runtimePath !== bundledPath) {
-  if (existsSync(bundledPath)) {
-    copyFileSync(bundledPath, runtimePath);
-  }
+// 👇 ใช้ไฟล์เดียวตลอด (อยู่ใต้โปรเจกต์)
+// ถ้าต้องการย้าย path ก็ใช้ env DB_FILE_PATH ได้
+const dbPath = process.env.DB_FILE_PATH
+  ? join(process.cwd(), process.env.DB_FILE_PATH)
+  : join(process.cwd(), "loan.db");
+
+if (isServerless) {
+  console.warn(
+    "[DB] Running on a serverless platform (e.g., Vercel). " +
+      "SQLite file on local filesystem is NOT persistent across cold starts. " +
+      "Use an external database (Postgres/MySQL/hosted SQLite) for real persistence."
+  );
+} else {
+  console.log("[DB] Using SQLite file at:", dbPath);
 }
-const db = new Database(runtimePath);
 
+const db = new Database(dbPath);
+
+// ---------- SCHEMA ----------
 db.exec(`
   CREATE TABLE IF NOT EXISTS partners (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,8 +66,8 @@ db.exec(`
     created_at TEXT
   );
 `);
-export type ConversationChannel = "line" | "line-group" | "backoffice";
 
+export type ConversationChannel = "line" | "line-group" | "backoffice";
 
 export interface ConversationLog {
   case_id: string | null;
@@ -95,7 +106,6 @@ export function insertConversationLog(log: ConversationLog): void {
   );
 }
 
-
 // ---------- HELPERS ----------
 
 export function getPartnerByChannelId(channelId: string): Partner | undefined {
@@ -124,9 +134,9 @@ export function getPartnerById(id: number): Partner | undefined {
 }
 
 export function getPartnerByLine(lineId: string): Partner | undefined {
-  return db.prepare("SELECT * FROM partners WHERE channel_id = ?").get(lineId) as
-    | Partner
-    | undefined;
+  return db
+    .prepare("SELECT * FROM partners WHERE channel_id = ?")
+    .get(lineId) as Partner | undefined;
 }
 
 export function insertApplication(app: Application): void {
@@ -187,7 +197,6 @@ export function findApplication(query: string): Application | undefined {
     .get(query, `%${query}%`) as Application | undefined;
 }
 
-// map status string -> group (ไว้ใช้สี ฯลฯ)
 function mapStatusGroup(status: string): string {
   const s = status.trim();
   if (!s) return "pending";
@@ -206,7 +215,6 @@ export function updateApplicationStatus(
   const now = new Date().toISOString();
   const statusGroup = mapStatusGroup(status);
 
-  // ดึง loan_amount ปัจจุบันมาใช้คำนวณ LTV
   const row = db
     .prepare("SELECT loan_amount FROM applications WHERE id = ?")
     .get(id) as { loan_amount: number | null } | undefined;
@@ -214,7 +222,7 @@ export function updateApplicationStatus(
   let ltv: string | null = null;
   if (row && row.loan_amount != null && collateralValue && collateralValue > 0) {
     const ratio = (row.loan_amount / collateralValue) * 100;
-    const rounded = Math.round(ratio * 10) / 10; // ปัดทศนิยม 1 ตำแหน่ง
+    const rounded = Math.round(ratio * 10) / 10;
     ltv = `${rounded}%`;
   }
 
@@ -250,14 +258,15 @@ export function getAllApplications(): Application[] {
     .all() as Application[];
 }
 
-
 export function getApplicationById(id: string): Application | undefined {
   return db
     .prepare("SELECT * FROM applications WHERE id = ? LIMIT 1")
     .get(id) as Application | undefined;
 }
 
-export function getChannelsByCaseId(caseId: string): { channel_id: string; channel_type: "user" | "group" }[] {
+export function getChannelsByCaseId(
+  caseId: string
+): { channel_id: string; channel_type: "user" | "group" }[] {
   const rows = db
     .prepare(
       `
@@ -284,8 +293,4 @@ export function deleteLogsByCaseId(caseId: string) {
   db.prepare(`DELETE FROM conversation_logs WHERE case_id = ?`).run(caseId);
 }
 
-
-
 export default db;
-
-
