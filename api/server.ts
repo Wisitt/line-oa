@@ -1,5 +1,4 @@
 // api/server.ts
-// Shared logic (no server runtime) for LINE handlers and admin updates
 
 import "dotenv/config";
 import { Client } from "@line/bot-sdk";
@@ -13,7 +12,12 @@ import {
   insertConversationLog,
   getChannelsByCaseId
 } from "../src/db.js";
-import type { Application, UpdateStatusRequest } from "../src/types";
+import type {
+  Application,
+  ChannelKind,
+  ConversationLog,
+  UpdateStatusRequest
+} from "../src/types";
 
 // ---------- LINE Bot client ----------
 const line = new Client({
@@ -21,16 +25,96 @@ const line = new Client({
   channelSecret: process.env.LINE_CHANNEL_SECRET || ""
 });
 
-// ---------- Helper: reply แบบกันตาย ----------
-async function safeReply(event: any, message: string) {
+type ChannelType = "user" | "group";
+
+interface ChannelContext {
+  id: string;
+  type: ChannelType;
+  channel: ChannelKind;
+  role: "partner" | "bank";
+}
+
+const lineConfigReady =
+  Boolean(process.env.LINE_CHANNEL_ACCESS_TOKEN) &&
+  Boolean(process.env.LINE_CHANNEL_SECRET);
+
+if (!lineConfigReady) {
+  console.warn(
+    "[WARN] LINE credentials are missing. Replies and push messages will fail until environment variables are set."
+  );
+}
+
+function logLineError(stage: string, err: any) {
+  const data = err?.originalError?.response?.data;
+  console.error(`LINE ${stage} error:`, data || err);
+}
+
+function parseNumber(val: string | null | undefined): number | null {
+  if (!val) return null;
+  const cleaned = val.replace(/[, ]/g, "");
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
+}
+
+function getChannelContext(source: any): ChannelContext {
+  if (source.type === "group") {
+    return {
+      id: source.groupId,
+      type: "group",
+      channel: "line-group",
+      role: "bank"
+    };
+  }
+
+  return {
+    id: source.userId,
+    type: "user",
+    channel: "line",
+    role: "partner"
+  };
+}
+
+function logConversationSafe(entry: ConversationLog): void {
   try {
-    await line.replyMessage(event.replyToken, {
-      type: "text",
-      text: message
-    });
+    insertConversationLog(entry);
+  } catch (err) {
+    console.error("DB error (conversation log):", err);
+  }
+}
+
+async function replyWithFallback(
+  event: any,
+  ctx: ChannelContext,
+  message: string,
+  caseId: string | null = null
+): Promise<void> {
+  logConversationSafe({
+    case_id: caseId,
+    line_user_id: ctx.id,
+    role: "bot",
+    direction: "outgoing",
+    channel: ctx.channel,
+    message_text: message,
+    raw_payload: null
+  });
+
+  if (!lineConfigReady) {
+    console.error("Skip sending message because LINE credentials are not configured.");
+    return;
+  }
+
+  const payload = { type: "text" as const, text: message };
+
+  try {
+    await line.replyMessage(event.replyToken, payload);
   } catch (err: any) {
-    const data = err?.originalError?.response?.data;
-    console.error("LINE reply error:", data || err);
+    logLineError("reply", err);
+
+    try {
+      await line.pushMessage(ctx.id, payload);
+    } catch (pushErr) {
+      logLineError("push (fallback)", pushErr);
+    }
   }
 }
 
@@ -101,8 +185,15 @@ export function baht(n: number | null | undefined): string {
 }
 
 export function extractCaseId(text: string): string | null {
-  const m = text.match(/HL-?\d{4,}/i);
-  return m ? m[0].replace(/-/g, "") : null;
+  const match = text.match(/HL-?\d{4}-?\d{4}/i);
+  if (!match) return null;
+
+  const digits = match[0].replace(/[^0-9]/g, "");
+  if (digits.length < 8) return null;
+
+  const year = digits.slice(0, 4);
+  const suffix = digits.slice(4);
+  return `HL-${year}-${suffix}`;
 }
 
 const STATUS_KEYWORDS = [
@@ -121,6 +212,77 @@ export function extractStatus(text: string): string | null {
   return null;
 }
 
+function helpMessage(): string {
+  return (
+    "สวัสดีครับ ระบบสินเชื่อบ้าน\n\n" +
+    "• เปิดเคสใหม่:\n" +
+    "#เปิดเคส ชื่อลูกค้า=... | เงินเดือน=... | วงเงิน=...\n\n" +
+    "• เช็คสถานะเคส:\n" +
+    "#เช็คเคส เลขเคส หรือชื่อลูกค้า"
+  );
+}
+
+function parseNewCasePayload(text: string):
+  | { ok: true; data: Partial<Application> }
+  | { ok: false; error: string } {
+  let cleaned = text.replace(
+    /(เงินเดือน|รายได้|วงเงิน|ยอดกู้|ทรัพย์|โครงการ)\s*=/g,
+    "|$1="
+  );
+  if (cleaned.startsWith("|")) cleaned = cleaned.slice(1).trim();
+
+  const parts = cleaned
+    .split("|")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const data: Partial<Application> = {
+    customer_name: "",
+    monthly_income: null,
+    loan_amount: null,
+    property_type: "",
+    project_name: ""
+  };
+
+  let sawIncome = false;
+  let sawLoan = false;
+
+  for (const part of parts) {
+    const [rawKey = "", rawVal] = part.split("=");
+    const key = rawKey.trim();
+    const val = rawVal?.trim();
+    if (!key || !val) continue;
+
+    if (key.includes("ชื่อลูกค้า")) data.customer_name = val;
+    else if (key.includes("เงินเดือน") || key.includes("รายได้")) {
+      sawIncome = true;
+      data.monthly_income = parseNumber(val);
+    } else if (key.includes("วงเงิน") || key.includes("ยอดกู้")) {
+      sawLoan = true;
+      data.loan_amount = parseNumber(val);
+    } else if (key.includes("ทรัพย์")) data.property_type = val;
+    else if (key.includes("โครงการ")) data.project_name = val;
+  }
+
+  if (!data.customer_name) {
+    return {
+      ok: false,
+      error:
+        "❌ ข้อมูลไม่ครบ\nตัวอย่าง: #เปิดเคส ชื่อลูกค้า=นายสมชาย | เงินเดือน=85000 | วงเงิน=5000000"
+    };
+  }
+
+  if (sawIncome && data.monthly_income === null) {
+    return { ok: false, error: "❌ กรุณากรอกเงินเดือนเป็นตัวเลข เช่น 85000" };
+  }
+
+  if (sawLoan && data.loan_amount === null) {
+    return { ok: false, error: "❌ กรุณากรอกวงเงินเป็นตัวเลข เช่น 5000000" };
+  }
+
+  return { ok: true, data };
+}
+
 // --------------------------------------------------
 //  LINE EVENT HANDLER
 // --------------------------------------------------
@@ -129,40 +291,25 @@ export async function handleEvent(event: any) {
 
   const text: string = event.message.text.trim();
   const lower = text.toLowerCase();
-
-  // ---- ระบุต้นทาง user / group ----
-  const source = event.source;
-  let channelId: string;
-  let channelType: "user" | "group";
-
-  if (source.type === "group") {
-    channelId = source.groupId;
-    channelType = "group";
-  } else {
-    channelId = source.userId;
-    channelType = "user";
-  }
+  const ctx = getChannelContext(event.source);
+  const caseIdFromMessage = extractCaseId(text);
 
   // partner + log
-  let partner = getPartnerByChannelId(channelId);
+  let partner = getPartnerByChannelId(ctx.id);
   if (!partner) {
-    insertPartner(`partner-${Date.now()}`, channelId, channelType);
-    partner = getPartnerByChannelId(channelId)!;
+    insertPartner(`partner-${Date.now()}`, ctx.id, ctx.type);
+    partner = getPartnerByChannelId(ctx.id)!;
   }
 
-  try {
-    insertConversationLog({
-      case_id: null,
-      line_user_id: channelId,
-      role: channelType === "group" ? "bank" : "partner",
-      direction: "incoming",
-      channel: channelType === "group" ? "line-group" : "line",
-      message_text: text,
-      raw_payload: event
-    });
-  } catch (err) {
-    console.error("DB error (conversation log):", err);
-  }
+  logConversationSafe({
+    case_id: caseIdFromMessage,
+    line_user_id: ctx.id,
+    role: ctx.role,
+    direction: "incoming",
+    channel: ctx.channel,
+    message_text: text,
+    raw_payload: event
+  });
 
   // --------------------------------------------------
   //  เปิดเคสใหม่
@@ -177,47 +324,13 @@ export async function handleEvent(event: any) {
       }
     });
 
-    // normalize key=value ให้แยกด้วย |
-    cleaned = cleaned.replace(
-      /(เงินเดือน|รายได้|วงเงิน|ยอดกู้|ทรัพย์|โครงการ)\s*=/g,
-      "|$1="
-    );
-    if (cleaned.startsWith("|")) cleaned = cleaned.slice(1).trim();
-
-    const parts = cleaned.split("|").map((x) => x.trim());
-    const a: Partial<Application> = {
-      customer_name: "",
-      monthly_income: null,
-      loan_amount: null,
-      property_type: "",
-      project_name: ""
-    };
-
-    for (const part of parts) {
-      const [rawKey = "", rawVal] = part.split("=");
-      if (!rawVal) continue;
-
-      const key = rawKey.trim();
-      const val = rawVal.trim();
-      if (!key) continue;
-
-      if (key.includes("ชื่อลูกค้า")) a.customer_name = val;
-      else if (key.includes("เงินเดือน") || key.includes("รายได้"))
-        a.monthly_income = Number(val);
-      else if (key.includes("วงเงิน") || key.includes("ยอดกู้"))
-        a.loan_amount = Number(val);
-      else if (key.includes("ทรัพย์")) a.property_type = val;
-      else if (key.includes("โครงการ")) a.project_name = val;
-    }
-
-    if (!a.customer_name) {
-      await safeReply(
-        event,
-        "❌ ข้อมูลไม่ครบ\nตัวอย่าง: #เปิดเคส ชื่อลูกค้า=นายสมชาย | เงินเดือน=85000 | วงเงิน=5000000"
-      );
+    const parsed = parseNewCasePayload(cleaned);
+    if (!parsed.ok) {
+      await replyWithFallback(event, ctx, parsed.error, null);
       return;
     }
 
+    const a = parsed.data;
     const now = new Date().toISOString();
     const id = genId();
 
@@ -227,7 +340,7 @@ export async function handleEvent(event: any) {
       partner_id: partner.id,
       partner_name: partner?.name ?? "",
       bank_name: "KBank",
-      customer_name: a.customer_name!,
+      customer_name: a.customer_name || "",
       monthly_income: a.monthly_income ?? null,
       property_type: a.property_type || "",
       project_name: a.project_name || "",
@@ -246,21 +359,35 @@ export async function handleEvent(event: any) {
       insertApplication(newApp);
     } catch (err) {
       console.error("DB error (insertApplication):", err);
-      await safeReply(
+      await replyWithFallback(
         event,
-        "❌ ระบบขัดข้อง ไม่สามารถบันทึกเคสได้ กรุณาลองใหม่อีกครั้ง"
+        ctx,
+        "❌ ระบบขัดข้อง ไม่สามารถบันทึกเคสได้ กรุณาลองใหม่อีกครั้ง",
+        null
       );
       return;
     }
 
-    await safeReply(
+    logConversationSafe({
+      case_id: id,
+      line_user_id: ctx.id,
+      role: ctx.role,
+      direction: "incoming",
+      channel: ctx.channel,
+      message_text: text,
+      raw_payload: event
+    });
+
+    await replyWithFallback(
       event,
+      ctx,
       `✅ เปิดเคสใหม่แล้ว\n` +
         `เลขเคส: ${id}\n` +
         `ชื่อลูกค้า: ${a.customer_name}\n` +
         `เงินเดือน: ${baht(a.monthly_income)}\n` +
         `ยอดกู้: ${baht(a.loan_amount)}\n` +
-        `โครงการ: ${a.project_name}`
+        `โครงการ: ${a.project_name}`,
+      id
     );
     return;
   }
@@ -272,7 +399,7 @@ export async function handleEvent(event: any) {
   if (CMD_CHECK.some((p) => lower.startsWith(p.toLowerCase()))) {
     const query = text.replace(/^#เช็คเคส|^#สถานะ|^#เช็คสถานะ/i, "").trim();
     if (!query) {
-      await safeReply(event, "กรุณาระบุเลขเคส หรือชื่อลูกค้า");
+      await replyWithFallback(event, ctx, "กรุณาระบุเลขเคส หรือชื่อลูกค้า", caseIdFromMessage);
       return;
     }
 
@@ -281,21 +408,34 @@ export async function handleEvent(event: any) {
       app = findApplication(query);
     } catch (err) {
       console.error("DB error (findApplication):", err);
-      await safeReply(
+      await replyWithFallback(
         event,
-        "❌ ระบบขัดข้อง ไม่สามารถค้นหาเคสได้ กรุณาลองใหม่อีกครั้ง"
+        ctx,
+        "❌ ระบบขัดข้อง ไม่สามารถค้นหาเคสได้ กรุณาลองใหม่อีกครั้ง",
+        caseIdFromMessage
       );
       return;
     }
 
     if (!app) {
-      await safeReply(event, `❌ ไม่พบเคส "${query}"`);
+      await replyWithFallback(event, ctx, `❌ ไม่พบเคส "${query}"`, caseIdFromMessage);
       return;
     }
 
+    logConversationSafe({
+      case_id: app.id,
+      line_user_id: ctx.id,
+      role: ctx.role,
+      direction: "incoming",
+      channel: ctx.channel,
+      message_text: text,
+      raw_payload: event
+    });
+
     const ltvText = app.ltv ? ` (LTV ${app.ltv})` : "";
-    await safeReply(
+    await replyWithFallback(
       event,
+      ctx,
       `📌 รายละเอียดเคส\n` +
         `เลขเคส: ${app.id}\n` +
         `ชื่อลูกค้า: ${app.customer_name}\n` +
@@ -303,7 +443,8 @@ export async function handleEvent(event: any) {
         `โครงการ: ${app.project_name}\n` +
         `ยอดกู้: ${baht(app.loan_amount)}${ltvText}\n` +
         `สถานะ: ${app.status}\n` +
-        `เครดิตสกอร์: ${app.credit_score ?? "-"}`
+        `เครดิตสกอร์: ${app.credit_score ?? "-"}`,
+      app.id
     );
     return;
   }
@@ -311,14 +452,7 @@ export async function handleEvent(event: any) {
   // --------------------------------------------------
   //  Default help
   // --------------------------------------------------
-  await safeReply(
-    event,
-    "สวัสดีครับ ระบบสินเชื่อบ้าน\n\n" +
-      "• เปิดเคสใหม่:\n" +
-      "#เปิดเคส ชื่อลูกค้า=... | เงินเดือน=... | วงเงิน=...\n\n" +
-      "• เช็คสถานะเคส:\n" +
-      "#เช็คเคส เลขเคส"
-  );
+  await replyWithFallback(event, ctx, helpMessage(), caseIdFromMessage);
 }
 
 // --------------------------------------------------

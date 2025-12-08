@@ -124,7 +124,7 @@ export function getPartnerById(id: number): Partner | undefined {
 }
 
 export function getPartnerByLine(lineId: string): Partner | undefined {
-  return db.prepare("SELECT * FROM partners WHERE line_user_id = ?").get(lineId) as
+  return db.prepare("SELECT * FROM partners WHERE channel_id = ?").get(lineId) as
     | Partner
     | undefined;
 }
