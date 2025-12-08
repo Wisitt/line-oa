@@ -1,6 +1,14 @@
+// api/index.ts
+
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { handleEvent, handleAdminUpdate } from "./server.js";
-import { getAllApplications, getApplicationById } from "../src/db.js";
+import {
+  getAllApplications,
+  getApplicationById,
+  deleteApplicationById,
+  deleteLogsByCaseId,
+  deletePartnerById
+} from "../src/db.js";
 import { renderDashboardHtml, renderAppHtml } from "../src/render.js";
 import type { UpdateStatusRequest } from "../src/types";
 import { createServer, ServerResponse } from "http";
@@ -43,44 +51,41 @@ export default async function handler(
 
   if (req.method === "GET" && path === "/admin/dashboard") {
     const tab = (url.searchParams.get("tab") as string) || "all";
-    const html = renderDashboardHtml(getAllApplications(), tab);
+    const apps = await getAllApplications();
+    const html = renderDashboardHtml(apps, tab);
     res.status(200).setHeader("Content-Type", "text/html; charset=utf-8").send(html);
     return;
   }
 
-  
+  // ลบเคส + log ที่เกี่ยวข้องทั้งหมด
   if (req.method === "POST" && path.startsWith("/admin/delete-case/")) {
-  const id = decodeURIComponent(path.split("/").pop() || "");
+    const id = decodeURIComponent(path.split("/").pop() || "");
 
-  const { deleteApplicationById, deleteLogsByCaseId } = require("../src/db.js");
+    await deleteApplicationById(id);
+    await deleteLogsByCaseId(id);
 
-  // ลบข้อมูลหลัก
-  deleteApplicationById(id);
+    res.status(200).send(`Deleted case: ${id}`);
+    return;
+  }
 
-  // ลบ log ที่เกี่ยวข้องทั้งหมด
-  deleteLogsByCaseId(id);
+  // ลบ partner ตาม id
+  if (req.method === "POST" && path.startsWith("/admin/delete-partner/")) {
+    const id = Number(path.split("/").pop() || "");
 
-  res.status(200).send(`Deleted case: ${id}`);
-  return;
-}
+    if (!Number.isFinite(id)) {
+      res.status(400).send("Invalid partner id");
+      return;
+    }
 
+    await deletePartnerById(id);
 
-if (req.method === "POST" && path.startsWith("/admin/delete-partner/")) {
-  const id = Number(path.split("/").pop() || "");
-
-  const { deletePartnerById } = require("../src/db.js");
-
-  deletePartnerById(id);
-
-  res.status(200).send(`Deleted partner: ${id}`);
-  return;
-}
-
-
+    res.status(200).send(`Deleted partner: ${id}`);
+    return;
+  }
 
   if (req.method === "GET" && path.startsWith("/admin/app/")) {
     const id = decodeURIComponent(path.split("/").pop() || "");
-    const application = getApplicationById(id);
+    const application = await getApplicationById(id);
     if (!application) {
       res.status(404).send("ไม่พบเคส");
       return;
@@ -138,7 +143,6 @@ if (req.method === "POST" && path.startsWith("/admin/delete-partner/")) {
   res.status(404).send("Not Found");
 }
 
-
 // ---------- Local dev server ----------
 function enhanceResponse(res: ServerResponse): VercelResponse {
   const r = res as any as VercelResponse;
@@ -162,8 +166,6 @@ function enhanceResponse(res: ServerResponse): VercelResponse {
   };
   return r;
 }
-
-
 
 if (!process.env.VERCEL) {
   const port = Number(process.env.PORT) || 3000;

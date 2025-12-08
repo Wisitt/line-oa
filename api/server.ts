@@ -74,9 +74,9 @@ function getChannelContext(source: any): ChannelContext {
   };
 }
 
-function logConversationSafe(entry: ConversationLog): void {
+async function logConversationSafe(entry: ConversationLog): Promise<void> {
   try {
-    insertConversationLog(entry);
+    await insertConversationLog(entry);
   } catch (err) {
     console.error("DB error (conversation log):", err);
   }
@@ -88,7 +88,7 @@ async function replyWithFallback(
   message: string,
   caseId: string | null = null
 ): Promise<void> {
-  logConversationSafe({
+  await logConversationSafe({
     case_id: caseId,
     line_user_id: ctx.id,
     role: "bot",
@@ -222,7 +222,9 @@ function helpMessage(): string {
   );
 }
 
-function parseNewCasePayload(text: string):
+function parseNewCasePayload(
+  text: string
+):
   | { ok: true; data: Partial<Application> }
   | { ok: false; error: string } {
   let cleaned = text.replace(
@@ -295,13 +297,23 @@ export async function handleEvent(event: any) {
   const caseIdFromMessage = extractCaseId(text);
 
   // partner + log
-  let partner = getPartnerByChannelId(ctx.id);
+  let partner = await getPartnerByChannelId(ctx.id);
   if (!partner) {
-    insertPartner(`partner-${Date.now()}`, ctx.id, ctx.type);
-    partner = getPartnerByChannelId(ctx.id)!;
+    await insertPartner(`partner-${Date.now()}`, ctx.id, ctx.type);
+    partner = await getPartnerByChannelId(ctx.id);
+    if (!partner) {
+      console.error("Failed to create partner record");
+      await replyWithFallback(
+        event,
+        ctx,
+        "❌ ระบบขัดข้อง ไม่สามารถผูก Partner กับ LINE ได้",
+        caseIdFromMessage
+      );
+      return;
+    }
   }
 
-  logConversationSafe({
+  await logConversationSafe({
     case_id: caseIdFromMessage,
     line_user_id: ctx.id,
     role: ctx.role,
@@ -356,7 +368,7 @@ export async function handleEvent(event: any) {
     };
 
     try {
-      insertApplication(newApp);
+      await insertApplication(newApp);
     } catch (err) {
       console.error("DB error (insertApplication):", err);
       await replyWithFallback(
@@ -368,7 +380,7 @@ export async function handleEvent(event: any) {
       return;
     }
 
-    logConversationSafe({
+    await logConversationSafe({
       case_id: id,
       line_user_id: ctx.id,
       role: ctx.role,
@@ -405,7 +417,7 @@ export async function handleEvent(event: any) {
 
     let app: Application | undefined;
     try {
-      app = findApplication(query);
+      app = await findApplication(query);
     } catch (err) {
       console.error("DB error (findApplication):", err);
       await replyWithFallback(
@@ -422,7 +434,7 @@ export async function handleEvent(event: any) {
       return;
     }
 
-    logConversationSafe({
+    await logConversationSafe({
       case_id: app.id,
       line_user_id: ctx.id,
       role: ctx.role,
@@ -462,7 +474,7 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
   const { id, status, credit_score, officer_name, collateral_value } = body;
 
   try {
-    updateApplicationStatus(
+    await updateApplicationStatus(
       id,
       status,
       credit_score || null,
@@ -474,7 +486,7 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
     return { ok: false };
   }
 
-  const app = findApplication(id);
+  const app = await findApplication(id);
   if (!app) return { ok: false };
 
   const pushText =
@@ -484,16 +496,16 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
     `เครดิตสกอร์: ${credit_score ?? "-"}\n` +
     (officer_name ? `โดย: ${officer_name}` : "");
 
-  const channels = getChannelsByCaseId(id);
+  const channels = await getChannelsByCaseId(id);
 
   // fallback partner เดิม ถ้าไม่มี log อะไรเลย
   if (!channels.length) {
-    const partner = getPartnerById(app.partner_id);
+    const partner = await getPartnerById(app.partner_id);
     if (partner) {
       const targetId = partner.channel_id;
       await line.pushMessage(targetId, { type: "text", text: pushText });
 
-      insertConversationLog({
+      await insertConversationLog({
         case_id: id,
         line_user_id: targetId,
         role: "bot",
@@ -512,7 +524,7 @@ export async function handleAdminUpdate(body: UpdateStatusRequest) {
     });
 
     try {
-      insertConversationLog({
+      await insertConversationLog({
         case_id: id,
         line_user_id: ch.channel_id,
         role: "bot",

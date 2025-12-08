@@ -12,13 +12,14 @@
   },
   "dependencies": {
     "@line/bot-sdk": "^7.5.2",
+    "@vercel/postgres": "^0.10.0",
     "better-sqlite3": "^9.6.0",
     "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.9",
-    "@vercel/node": "^3.1.4",
     "@types/node": "^20.14.10",
+    "@vercel/node": "^3.1.4",
     "tsx": "^4.7.0",
     "typescript": "^5.4.5"
   }
